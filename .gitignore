@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Duplicate backend (Python source lives in src/, not inside web-vue/)
+web-vue/src/highend_server/
+web-vue/src/highend_control_server.egg-info/
+
+# Node
+web-vue/node_modules/
+web-vue/dist/
+
+# Logs
+Logs/telemetry/
+web-vue/Logs/
+
+# Pytest
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.claude/
+.highend_windows_ports.json
+*.local.json
+
+# Legacy files (superseded by web app)
+Highend_Ctrl_mod.py
+Native_GuiApp_main2.py
+layout.kv
+web/
+web-vue/web/
+web-vue/build.log
+
+# Duplicates inside web-vue/ (canonical copies live at project root)
+web-vue/Motion/
+web-vue/motion/
+web-vue/PQL-LG00-A1_description/
+web-vue/pql-lg00-a1_description/
+web-vue/pql-a00_description/
+web-vue/docs/
+web-vue/pyproject.toml
+web-vue/scripts/
+web-vue/tests/
+web-vue/Rabbot-labo*.png
+
+# Motion: custom motions are user-generated, not tracked
+Motion/
+motion/custom/
+
+# LLM context docs (generated, not source)
+docs/llms.txt
+docs/llms-full.txt
