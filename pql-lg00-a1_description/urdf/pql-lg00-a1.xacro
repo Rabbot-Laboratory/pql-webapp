@@ -1,0 +1,83 @@
+<?xml version="1.0" ?>
+<robot name="pql-lg00-a1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<xacro:include filename="$(find pql-lg00-a1_description)/urdf/materials.xacro" />
+<xacro:include filename="$(find pql-lg00-a1_description)/urdf/pql-lg00-a1.trans" />
+<link name="base_link">
+  <inertial>
+    <origin xyz="0.01871731964212089 -0.07115672467022151 0.013156710906503478" rpy="0 0 0"/>
+    <mass value="0.4335509782581406"/>
+    <inertia ixx="0.001771" iyy="0.000394" izz="0.001822" ixy="-1.4e-05" iyz="-0.0002" ixz="-1.3e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL01-LU00-A1_v14_1">
+  <inertial>
+    <origin xyz="-0.02066117436310318 0.10971667126326837 -0.07028603060953578" rpy="0 0 0"/>
+    <mass value="0.46660200618579195"/>
+    <inertia ixx="0.003412" iyy="0.001097" izz="0.002492" ixy="6e-05" iyz="0.001476" ixz="-1.2e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.0353 0.16 -0.0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/PQL01-LU00-A1_v14_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.0353 0.16 -0.0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/PQL01-LU00-A1_v14_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="leg_down_assy_v7_1">
+  <inertial>
+    <origin xyz="-0.011219571275198643 -0.05262875621528823 -0.07082666557065093" rpy="0 0 0"/>
+    <mass value="0.10341532910050841"/>
+    <inertia ixx="0.000836" iyy="0.000569" izz="0.000283" ixy="7e-06" iyz="-0.000381" ixz="1e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.0283 -0.04905 0.146025" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/leg_down_assy_v7_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.0283 -0.04905 0.146025" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-lg00-a1_description/meshes/leg_down_assy_v7_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<joint name="rev1" type="continuous">
+  <origin xyz="0.0353 -0.16 0.0" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="PQL01-LU00-A1_v14_1"/>
+  <axis xyz="1.0 -0.0 0.0"/>
+</joint>
+
+<joint name="rev2" type="continuous">
+  <origin xyz="-0.007 0.20905 -0.146025" rpy="0 0 0"/>
+  <parent link="PQL01-LU00-A1_v14_1"/>
+  <child link="leg_down_assy_v7_1"/>
+  <axis xyz="1.0 -0.0 0.0"/>
+</joint>
+
+</robot>

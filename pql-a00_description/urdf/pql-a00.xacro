@@ -1,0 +1,363 @@
+<?xml version="1.0" ?>
+<robot name="pql-a00" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<xacro:include filename="$(find pql-a00_description)/urdf/materials.xacro" />
+<xacro:include filename="$(find pql-a00_description)/urdf/pql-a00.trans" />
+<link name="base_link">
+  <inertial>
+    <origin xyz="0.000666228527819759 0.0449066961934364 0.044985744216950285" rpy="0 0 0"/>
+    <mass value="11.062034583003802"/>
+    <inertia ixx="0.251535" iyy="0.070655" izz="0.256263" ixy="0.00406" iyz="-0.028747" ixz="0.004428"/>
+  </inertial>
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LF00-FR_v2_1">
+  <inertial>
+    <origin xyz="-0.04016034565269469 -0.005665764467265355 -0.0044264801520795954" rpy="0 0 0"/>
+    <mass value="0.5378040716013105"/>
+    <inertia ixx="0.001884" iyy="0.000624" izz="0.002097" ixy="-0.000125" iyz="-0.000193" ixz="-2e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.1308 0.168616 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FR_v2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="0.1308 0.168616 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FR_v2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL01-LU00-A1-FR_v1_1">
+  <inertial>
+    <origin xyz="0.013338825657128017 0.0858869245213571 -0.0979946189670268" rpy="0 0 0"/>
+    <mass value="0.46660200618579195"/>
+    <inertia ixx="0.003413" iyy="0.001992" izz="0.001598" ixy="5.4e-05" iyz="0.00162" ixz="-2.8e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.1978 0.268616 -0.111684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="0.1978 0.268616 -0.111684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LD00-FR_v1_1">
+  <inertial>
+    <origin xyz="0.00858042872764761 -0.06988360509929209 -0.05387455822466285" rpy="0 0 0"/>
+    <mass value="0.10341532910050841"/>
+    <inertia ixx="0.000836" iyy="0.000349" izz="0.000503" ixy="1e-05" iyz="-0.000399" ixz="8e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.1908 0.108346 0.086656" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="0.1908 0.108346 0.086656" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LF00-FL_v2_2">
+  <inertial>
+    <origin xyz="0.040153502557594534 -0.03966603142711683 -0.004488655705886899" rpy="0 0 0"/>
+    <mass value="0.5378074364089229"/>
+    <inertia ixx="0.001884" iyy="0.000624" izz="0.002097" ixy="0.000125" iyz="-0.000194" ixz="3e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.1308 0.134616 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FL_v2_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.1308 0.134616 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FL_v2_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL01-LU00-A1-FL_v1_1">
+  <inertial>
+    <origin xyz="-0.013498503512579946 0.07975680840708466 -0.1030252045983848" rpy="0 0 0"/>
+    <mass value="0.46660232369999866"/>
+    <inertia ixx="0.003413" iyy="0.002187" izz="0.001402" ixy="-5e-05" iyz="0.001585" ixz="2.8e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.197774 0.268616 -0.111581" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.197774 0.268616 -0.111581" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LD00-FL_v1_1">
+  <inertial>
+    <origin xyz="-0.008656603622099246 -0.07303621884014433 -0.049504150411748674" rpy="0 0 0"/>
+    <mass value="0.10341532222848374"/>
+    <inertia ixx="0.000836" iyy="0.000301" izz="0.000551" ixy="-1.1e-05" iyz="-0.000387" ixz="-8e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.190452 0.120728 0.096144" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.190452 0.120728 0.096144" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LF00-FL_v2_1">
+  <inertial>
+    <origin xyz="-0.040171253588116476 0.03966694156881802 -0.004326922960486937" rpy="0 0 0"/>
+    <mass value="0.5378074364089229"/>
+    <inertia ixx="0.001884" iyy="0.000624" izz="0.002097" ixy="0.000126" iyz="0.000193" ixz="-2e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.1233 -0.121384 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FL_v2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="0.1233 -0.121384 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-FL_v2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL01-LU00-A1-RR_v1_2">
+  <inertial>
+    <origin xyz="0.013065559102598157 -0.06961494996833639 -0.11018457413418754" rpy="0 0 0"/>
+    <mass value="0.46660232369999866"/>
+    <inertia ixx="0.003413" iyy="0.00248" izz="0.00111" ixy="-5.3e-05" iyz="-0.001482" ixz="-4.2e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.190342 -0.255385 -0.111851" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-RR_v1_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="0.190342 -0.255385 -0.111851" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-RR_v1_2.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LD00-RR_v1_1">
+  <inertial>
+    <origin xyz="-0.011324451504516247 0.077406354601607 -0.04233277672723178" rpy="0 0 0"/>
+    <mass value="0.10341532222848374"/>
+    <inertia ixx="0.000836" iyy="0.00023" izz="0.000622" ixy="-1e-05" iyz="0.000357" ixz="6e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.16389 -0.127885 0.109052" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-RR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="0.16389 -0.127885 0.109052" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-RR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LF00-RL_v1_1">
+  <inertial>
+    <origin xyz="0.04016034565270929 0.005666674608967692 -0.00442648015207249" rpy="0 0 0"/>
+    <mass value="0.5378040716013105"/>
+    <inertia ixx="0.001884" iyy="0.000624" izz="0.002097" ixy="-0.000125" iyz="0.000193" ixz="2e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.1308 -0.155384 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.1308 -0.155384 -0.128684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LF00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL01-LU00-A1-RL_v1_1">
+  <inertial>
+    <origin xyz="-0.013338825657112724 -0.0957521804795314 -0.0883801755803028" rpy="0 0 0"/>
+    <mass value="0.46660200618579195"/>
+    <inertia ixx="0.003413" iyy="0.001647" izz="0.001942" ixy="5.7e-05" iyz="-0.001626" ixz="2.2e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.1978 -0.255385 -0.111684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="_"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.1978 -0.255385 -0.111684" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL01-LU00-A1-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="PQL-LD00-RL_v1_1">
+  <inertial>
+    <origin xyz="-0.008580428727631345 0.05433883168513942 -0.06952363790553187" rpy="0 0 0"/>
+    <mass value="0.10341532910050841"/>
+    <inertia ixx="0.000836" iyy="0.000551" izz="0.000301" ixy="7e-06" iyz="0.000387" ixz="-1e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.1908 -0.075072 0.068628" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="abs"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.1908 -0.075072 0.068628" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://pql-a00_description/meshes/PQL-LD00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<joint name="rev_fr1" type="continuous">
+  <origin xyz="-0.1308 -0.168616 0.128684" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="PQL-LF00-FR_v2_1"/>
+  <axis xyz="-0.0 1.0 0.0"/>
+</joint>
+
+<joint name="rev_fr2" type="continuous">
+  <origin xyz="-0.067 -0.1 -0.017" rpy="0 0 0"/>
+  <parent link="PQL-LF00-FR_v2_1"/>
+  <child link="PQL01-LU00-A1-FR_v1_1"/>
+  <axis xyz="1.0 0.0 0.0"/>
+</joint>
+
+<joint name="rev_fr3" type="continuous">
+  <origin xyz="0.007 0.16027 -0.19834" rpy="0 0 0"/>
+  <parent link="PQL01-LU00-A1-FR_v1_1"/>
+  <child link="PQL-LD00-FR_v1_1"/>
+  <axis xyz="1.0 0.0 0.0"/>
+</joint>
+
+<joint name="rev_fl1" type="continuous">
+  <origin xyz="0.1308 -0.134616 0.128684" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="PQL-LF00-FL_v2_2"/>
+  <axis xyz="0.0 -1.0 0.0"/>
+</joint>
+
+<joint name="rev_fl2" type="continuous">
+  <origin xyz="0.066974 -0.134 -0.017103" rpy="0 0 0"/>
+  <parent link="PQL-LF00-FL_v2_2"/>
+  <child link="PQL01-LU00-A1-FL_v1_1"/>
+  <axis xyz="0.999999 -0.0 -0.001546"/>
+</joint>
+
+<joint name="rev_fl3" type="continuous">
+  <origin xyz="-0.007322 0.147888 -0.207725" rpy="0 0 0"/>
+  <parent link="PQL01-LU00-A1-FL_v1_1"/>
+  <child link="PQL-LD00-FL_v1_1"/>
+  <axis xyz="0.999999 -0.0 -0.001546"/>
+</joint>
+
+<joint name="rev_rr1" type="continuous">
+  <origin xyz="-0.1233 0.121384 0.128684" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="PQL-LF00-FL_v2_1"/>
+  <axis xyz="-0.0 1.0 -0.0"/>
+</joint>
+
+<joint name="rev_rr2" type="continuous">
+  <origin xyz="-0.067042 0.134001 -0.016833" rpy="0 0 0"/>
+  <parent link="PQL-LF00-FL_v2_1"/>
+  <child link="PQL01-LU00-A1-RR_v1_2"/>
+  <axis xyz="-0.999997 -0.0 0.002481"/>
+</joint>
+
+<joint name="rev_rr3" type="continuous">
+  <origin xyz="0.026452 -0.1275 -0.220903" rpy="0 0 0"/>
+  <parent link="PQL01-LU00-A1-RR_v1_2"/>
+  <child link="PQL-LD00-RR_v1_1"/>
+  <axis xyz="-0.999997 -0.0 0.002481"/>
+</joint>
+
+<joint name="rev_rl1" type="continuous">
+  <origin xyz="0.1308 0.155384 0.128684" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="PQL-LF00-RL_v1_1"/>
+  <axis xyz="0.0 -1.0 0.0"/>
+</joint>
+
+<joint name="rev_rl2" type="continuous">
+  <origin xyz="0.067 0.100001 -0.017" rpy="0 0 0"/>
+  <parent link="PQL-LF00-RL_v1_1"/>
+  <child link="PQL01-LU00-A1-RL_v1_1"/>
+  <axis xyz="-1.0 -0.0 0.0"/>
+</joint>
+
+<joint name="rev_rl3" type="continuous">
+  <origin xyz="-0.007 -0.180313 -0.180312" rpy="0 0 0"/>
+  <parent link="PQL01-LU00-A1-RL_v1_1"/>
+  <child link="PQL-LD00-RL_v1_1"/>
+  <axis xyz="-1.0 -0.0 0.0"/>
+</joint>
+
+</robot>
