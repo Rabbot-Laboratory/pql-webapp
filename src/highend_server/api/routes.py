@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from highend_server.api.dependencies import get_control_service
+from highend_server.api.dependencies import get_control_service, get_sensor_service
 from highend_server.application.control_service import ControlService
 from highend_server.domain.models import (
     CaptureRequest,
@@ -10,6 +10,7 @@ from highend_server.domain.models import (
     FixedMotionRequest,
     HealthResponse,
     ImportLegacyCsvRequest,
+    ImuCalibrationRequest,
     LegId,
     MotionCategory,
     SaveMotionRequest,
@@ -18,6 +19,7 @@ from highend_server.domain.models import (
     StartTelemetryRecordingRequest,
     TelemetryRecordingStatus,
 )
+from highend_server.sensors.sensor_service import SensorService
 
 
 router = APIRouter()
@@ -43,6 +45,32 @@ async def health(service: ControlService = Depends(get_control_service)) -> Heal
 @router.get("/actuators")
 async def list_actuators(service: ControlService = Depends(get_control_service)) -> dict:
     return {"items": [actuator.model_dump(mode="json") for actuator in service.list_actuators()]}
+
+
+@router.get("/sensors")
+async def get_sensors(service: SensorService = Depends(get_sensor_service)) -> dict:
+    return {"item": service.state.model_dump(mode="json")}
+
+
+@router.post("/sensors/imu/calibration/level")
+async def calibrate_imu_level(service: SensorService = Depends(get_sensor_service)) -> dict:
+    state = await service.calibrate_level()
+    return {"item": state.model_dump(mode="json")}
+
+
+@router.post("/sensors/imu/calibration/gyro-zero")
+async def calibrate_imu_gyro_zero(
+    request: ImuCalibrationRequest | None = None,
+    service: SensorService = Depends(get_sensor_service),
+) -> dict:
+    state = await service.calibrate_gyro_zero((request or ImuCalibrationRequest()).sample_count)
+    return {"item": state.model_dump(mode="json")}
+
+
+@router.post("/sensors/imu/calibration/reset")
+async def reset_imu_calibration(service: SensorService = Depends(get_sensor_service)) -> dict:
+    state = await service.reset_imu_calibration()
+    return {"item": state.model_dump(mode="json")}
 
 
 @router.get("/actuators/{actuator_id}")
@@ -241,6 +269,7 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     "system": service.system_status.model_dump(mode="json"),
                     "actuators": [item.model_dump(mode="json") for item in service.list_actuators()],
                     "legs": [item.model_dump(mode="json") for item in service.list_leg_previews()],
+                    "sensors": websocket.app.state.sensor_service.state.model_dump(mode="json"),
                 },
             }
         )

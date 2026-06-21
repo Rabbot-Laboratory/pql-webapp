@@ -7,6 +7,7 @@ import type {
   MotionCategory,
   MotionFileDetail,
   MotionLibrarySnapshot,
+  SensorState,
   TelemetryRecordingScope,
   TelemetryRecordingStatus,
   TelemetryEvent,
@@ -26,6 +27,30 @@ export async function fetchHealth(): Promise<HealthResponse> {
 
 export async function fetchActuators(): Promise<{ items: ActuatorState[] }> {
   return readJson<{ items: ActuatorState[] }>('/api/actuators');
+}
+
+export async function fetchSensors(): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors');
+}
+
+export async function calibrateImuLevel(): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/level', {
+    method: 'POST',
+  });
+}
+
+export async function calibrateImuGyroZero(sampleCount = 60): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/gyro-zero', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sample_count: sampleCount }),
+  });
+}
+
+export async function resetImuCalibration(): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/reset', {
+    method: 'POST',
+  });
 }
 
 export async function fetchLegPreviews(): Promise<{ items: LegPreview[] }> {

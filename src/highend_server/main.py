@@ -10,6 +10,7 @@ from highend_server.api.routes import router
 from highend_server.api.websocket_manager import WebSocketManager
 from highend_server.application.control_service import ControlService
 from highend_server.config import get_settings
+from highend_server.sensors.sensor_service import SensorService
 from highend_server.transport.serial_gateway import build_gateway
 
 LEGACY_WEB_DIR = Path(__file__).resolve().parents[2] / "web"
@@ -21,9 +22,11 @@ PQL_A00_MESH_DIR = Path(__file__).resolve().parents[2] / "pql-a00_description" /
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await app.state.control_service.connect()
+    await app.state.sensor_service.start()
     try:
         yield
     finally:
+        await app.state.sensor_service.stop()
         await app.state.control_service.shutdown()
 
 
@@ -32,6 +35,7 @@ def create_app() -> FastAPI:
     websocket_manager = WebSocketManager()
     gateway = build_gateway(settings)
     control_service = ControlService(settings=settings, gateway=gateway, event_sink=websocket_manager.broadcast)
+    sensor_service = SensorService(settings=settings, event_sink=websocket_manager.broadcast)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(
@@ -45,6 +49,7 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.websocket_manager = websocket_manager
     app.state.control_service = control_service
+    app.state.sensor_service = sensor_service
 
     app.include_router(router, prefix="/api")
     if PQL_A00_DESCRIPTION_DIR.exists():

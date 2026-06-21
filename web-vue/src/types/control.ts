@@ -6,6 +6,7 @@ export type FixedMotion = 'crawl' | 'trot' | 'pace' | 'bound';
 export type MotionCategory = 'fixed' | 'custom';
 export type PlaybackAdvanceMode = 'time' | 'guarded';
 export type TelemetryRecordingScope = 'all' | 'selected';
+export type SensorConnectionState = 'disabled' | 'connecting' | 'connected' | 'error';
 
 export interface SystemStatus {
   connection_state: ConnectionState;
@@ -60,6 +61,60 @@ export interface TelemetrySample {
   pressure: number;
   target_position: number;
   target_command: number;
+}
+
+export interface ImuVector {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface ImuOrientation {
+  roll_deg: number;
+  pitch_deg: number;
+}
+
+export interface ImuCalibration {
+  level_roll_deg: number;
+  level_pitch_deg: number;
+  gyro_offset_dps: ImuVector;
+  updated_at: string;
+}
+
+export interface Bmx055State {
+  connection_state: SensorConnectionState;
+  error: string | null;
+  accel_g: ImuVector | null;
+  gyro_dps: ImuVector | null;
+  mag_raw: ImuVector | null;
+  raw_orientation: ImuOrientation | null;
+  orientation: ImuOrientation | null;
+  calibration: ImuCalibration;
+  temperature_c: number | null;
+  updated_at: string;
+}
+
+export interface AdcChannelState {
+  bank: number;
+  channel: number;
+  raw: number | null;
+  voltage: number | null;
+}
+
+export interface AdcBankState {
+  bus: number;
+  device: number;
+  connection_state: SensorConnectionState;
+  error: string | null;
+  channels: AdcChannelState[];
+  updated_at: string;
+}
+
+export interface SensorState {
+  enabled: boolean;
+  imu: Bmx055State;
+  adc_banks: AdcBankState[];
+  updated_at: string;
 }
 
 export interface JointPreview {
@@ -144,13 +199,6 @@ export interface TelemetryRecordingStatus {
   sample_count: number;
   scope: TelemetryRecordingScope;
   actuator_id: number | null;
-}
-
-export interface UiEventItem {
-  id: string;
-  type: string;
-  message: string;
-  timestamp: string;
 }
 
 export interface TelemetryEvent {

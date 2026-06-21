@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     custom_motion_dir_name: str = "Custom Motion"
     telemetry_log_root_dir: str = "Logs"
     telemetry_log_dir_name: str = "telemetry"
+    sensors_enabled: bool = False
+    sensor_poll_interval_sec: float = Field(default=0.05, gt=0.0)
+    sensor_i2c_bus: int = 1
+    bmx055_accel_address: int = 0x18
+    bmx055_gyro_address: int = 0x68
+    bmx055_mag_address: int = 0x10
+    adc_spi_bus: int = 0
+    adc_spi_devices: str = "0,1"
+    adc_spi_max_speed_hz: int = 1_000_000
+    adc_vref: float = Field(default=3.3, gt=0.0)
+    sensor_config_dir_name: str = "config"
+    imu_calibration_file_name: str = "imu_calibration.json"
 
     @property
     def project_root(self) -> Path:
@@ -58,6 +70,14 @@ class Settings(BaseSettings):
     @property
     def telemetry_log_path(self) -> Path:
         return self.telemetry_log_root_path / self.telemetry_log_dir_name
+
+    @property
+    def sensor_config_path(self) -> Path:
+        return self.project_root / self.sensor_config_dir_name
+
+    @property
+    def imu_calibration_path(self) -> Path:
+        return self.sensor_config_path / self.imu_calibration_file_name
 
 
 @lru_cache(maxsize=1)
