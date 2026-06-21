@@ -21,6 +21,10 @@ dev = [
     "pytest>=8.3,<9.0",
     "ruff>=0.6,<1.0",
 ]
+pi-sensors = [
+    "smbus2>=0.5,<1.0",
+    "spidev>=3.6,<4.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -34,4 +38,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

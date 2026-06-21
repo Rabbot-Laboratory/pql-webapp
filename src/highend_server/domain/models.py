@@ -70,6 +70,13 @@ class ConnectionState(str, Enum):
     ERROR = "error"
 
 
+class SensorConnectionState(str, Enum):
+    DISABLED = "disabled"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    ERROR = "error"
+
+
 class GainValues(BaseModel):
     p: int | None = None
     i: int | None = None
@@ -141,6 +148,64 @@ class HealthResponse(BaseModel):
     ok: bool
     service: str
     system: SystemStatus
+
+
+class ImuVector(BaseModel):
+    x: float
+    y: float
+    z: float
+
+
+class ImuOrientation(BaseModel):
+    roll_deg: float
+    pitch_deg: float
+
+
+class ImuCalibration(BaseModel):
+    level_roll_deg: float = 0.0
+    level_pitch_deg: float = 0.0
+    gyro_offset_dps: ImuVector = Field(default_factory=lambda: ImuVector(x=0.0, y=0.0, z=0.0))
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Bmx055State(BaseModel):
+    connection_state: SensorConnectionState = SensorConnectionState.DISABLED
+    error: str | None = None
+    accel_g: ImuVector | None = None
+    gyro_dps: ImuVector | None = None
+    mag_raw: ImuVector | None = None
+    raw_orientation: ImuOrientation | None = None
+    orientation: ImuOrientation | None = None
+    calibration: ImuCalibration = Field(default_factory=ImuCalibration)
+    temperature_c: float | None = None
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class AdcChannelState(BaseModel):
+    bank: int
+    channel: int
+    raw: int | None = None
+    voltage: float | None = None
+
+
+class AdcBankState(BaseModel):
+    bus: int
+    device: int
+    connection_state: SensorConnectionState = SensorConnectionState.DISABLED
+    error: str | None = None
+    channels: list[AdcChannelState] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class SensorState(BaseModel):
+    enabled: bool = False
+    imu: Bmx055State = Field(default_factory=Bmx055State)
+    adc_banks: list[AdcBankState] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ImuCalibrationRequest(BaseModel):
+    sample_count: int = Field(default=60, ge=1, le=300)
 
 
 class SetTargetRequest(BaseModel):

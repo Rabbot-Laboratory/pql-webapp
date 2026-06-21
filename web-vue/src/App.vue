@@ -15,6 +15,7 @@ import ActuatorTable from '@/components/ActuatorTable.vue';
 import FocusedLegView from '@/components/FocusedLegView.vue';
 import MotionControlPanel from '@/components/MotionControlPanel.vue';
 import PressureMonitorPanel from '@/components/PressureMonitorPanel.vue';
+import SensorCalibrationPanel from '@/components/SensorCalibrationPanel.vue';
 import StatusToolbar from '@/components/StatusToolbar.vue';
 import { useControlStore } from '@/stores/control';
 import type { ActuatorState, ControlMode, FixedMotion, MotionCategory } from '@/types/control';
@@ -24,6 +25,7 @@ const store = useControlStore();
 const toast = useToast();
 const navOpen = ref(false);
 const isMobile = ref(false);
+const sensorCalibrationBusy = ref(false);
 
 const tabOptions = computed(() =>
   isMobile.value
@@ -32,12 +34,14 @@ const tabOptions = computed(() =>
         { value: 'legs', label: '脚' },
         { value: 'motion', label: '動作' },
         { value: 'pressure', label: '圧力' },
+        { value: 'sensors', label: 'Sensor' },
       ]
     : [
         { value: 'dashboard', label: 'Dashboard' },
         { value: 'legs', label: 'Kinematics' },
         { value: 'motion', label: 'Motion' },
         { value: 'pressure', label: 'Pressure' },
+        { value: 'sensors', label: 'Sensor Calib' },
       ],
 );
 
@@ -197,6 +201,72 @@ async function handleStopTelemetryRecording(): Promise<void> {
 
 function handleDownloadTelemetryRecording(): void {
   store.downloadLatestTelemetryRecording();
+}
+
+async function handleCalibrateImuLevel(): Promise<void> {
+  sensorCalibrationBusy.value = true;
+  try {
+    await store.setImuLevelCalibration();
+    toast.add({
+      severity: 'success',
+      summary: 'IMU水平補正を保存しました',
+      detail: '現在のRoll/Pitchを0度基準にしました。',
+      life: 2200,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'IMU水平補正に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    sensorCalibrationBusy.value = false;
+  }
+}
+
+async function handleCalibrateImuGyro(): Promise<void> {
+  sensorCalibrationBusy.value = true;
+  try {
+    await store.setImuGyroZeroCalibration();
+    toast.add({
+      severity: 'success',
+      summary: 'IMUジャイロゼロを保存しました',
+      detail: '静止時のジャイロ平均値をオフセットにしました。',
+      life: 2200,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'IMUジャイロ補正に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    sensorCalibrationBusy.value = false;
+  }
+}
+
+async function handleResetImuCalibration(): Promise<void> {
+  sensorCalibrationBusy.value = true;
+  try {
+    await store.clearImuCalibration();
+    toast.add({
+      severity: 'success',
+      summary: 'IMU補正をリセットしました',
+      detail: '水平補正とジャイロオフセットを初期値に戻しました。',
+      life: 2200,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'IMU補正リセットに失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    sensorCalibrationBusy.value = false;
+  }
 }
 
 async function handleLibraryMotion(category: MotionCategory, name: string): Promise<void> {
@@ -367,7 +437,19 @@ onBeforeUnmount(() => {
           </TabPanel>
 
           <TabPanel value="pressure" class="flex-1 overflow-auto">
-            <PressureMonitorPanel :actuators="store.actuators" />
+            <PressureMonitorPanel :actuators="store.actuators" :sensors="store.sensors" />
+          </TabPanel>
+
+          <TabPanel value="sensors" class="flex-1 overflow-auto">
+            <section class="tab-layout">
+              <SensorCalibrationPanel
+                :sensors="store.sensors"
+                :busy="sensorCalibrationBusy"
+                @calibrate-level="handleCalibrateImuLevel"
+                @calibrate-gyro="handleCalibrateImuGyro"
+                @reset-calibration="handleResetImuCalibration"
+              />
+            </section>
           </TabPanel>
         </TabPanels>
       </Tabs>

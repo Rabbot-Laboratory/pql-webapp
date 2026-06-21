@@ -83,6 +83,82 @@ PowerShell demo shortcut:
 python -m highend_server --demo
 ```
 
+### Raspberry Pi IMU / ADC sensors
+
+The optional walking-feedback sensors are disabled by default so that Windows
+and demo launches keep working without Pi-only packages.
+
+Install the sensor extras on Raspberry Pi:
+
+```bash
+python -m pip install -e .[pi-sensors]
+```
+
+Enable I2C and SPI on the Pi:
+
+```bash
+sudo raspi-config
+```
+
+Expected devices after reboot:
+
+```bash
+ls /dev/i2c-1
+ls /dev/spidev0.*
+i2cdetect -y 1
+```
+
+For the CJMCU-055 / BMX055 wiring with `SDO1=GND` and `SDO2=GND`, the default
+I2C addresses are:
+
+- Accelerometer: `0x18`
+- Gyroscope: `0x68`
+- Magnetometer: `0x10`
+
+For two MCP3204 ADCs on SPI0 CE0 and CE1, the default SPI devices are:
+
+- `/dev/spidev0.0`
+- `/dev/spidev0.1`
+
+Enable sensor polling:
+
+```bash
+HIGHEND_SENSORS_ENABLED=true python -m highend_server
+```
+
+With `systemd`, set the same environment variable in `highend-control.service`.
+The sensor state is exposed through:
+
+- `GET /api/sensors`
+- WebSocket `sensor_state` events
+
+IMU calibration endpoints:
+
+- `POST /api/sensors/imu/calibration/level`
+- `POST /api/sensors/imu/calibration/gyro-zero`
+- `POST /api/sensors/imu/calibration/reset`
+
+The calibration file is saved as `config/imu_calibration.json`.
+
+Recommended calibration flow:
+
+1. Put the robot in its neutral standing posture.
+2. Press "current posture as level" to zero Roll / Pitch.
+3. Keep the robot completely still.
+4. Press "gyro zero" to average and save gyro drift.
+5. Check that corrected Roll / Pitch and Gyro values stay near zero.
+
+Useful environment overrides:
+
+- `HIGHEND_SENSOR_POLL_INTERVAL_SEC=0.05`
+- `HIGHEND_SENSOR_I2C_BUS=1`
+- `HIGHEND_BMX055_ACCEL_ADDRESS=24`
+- `HIGHEND_BMX055_GYRO_ADDRESS=104`
+- `HIGHEND_BMX055_MAG_ADDRESS=16`
+- `HIGHEND_ADC_SPI_BUS=0`
+- `HIGHEND_ADC_SPI_DEVICES=0,1`
+- `HIGHEND_ADC_VREF=3.3`
+
 Then open the browser dashboard:
 
 ```text
@@ -113,6 +189,10 @@ Main endpoints:
 
 - `GET /api/health`
 - `GET /api/actuators`
+- `GET /api/sensors`
+- `POST /api/sensors/imu/calibration/level`
+- `POST /api/sensors/imu/calibration/gyro-zero`
+- `POST /api/sensors/imu/calibration/reset`
 - `GET /api/preview/legs`
 - `POST /api/actuators/{id}/target`
 - `POST /api/actuators/{id}/gain`

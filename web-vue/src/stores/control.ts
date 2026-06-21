@@ -2,11 +2,14 @@ import { computed, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 
 import {
+  calibrateImuGyroZero,
+  calibrateImuLevel,
   createWebSocket,
   deleteMotionFile,
   fetchActuators,
   fetchHealth,
   fetchLegPreviews,
+  fetchSensors,
   fetchTelemetryRecordingStatus,
   fetchMotionFile,
   fetchMotionLibrary,
@@ -15,6 +18,7 @@ import {
   requestCapture,
   requestGain,
   requestGainSave,
+  resetImuCalibration,
   saveMotionFile,
   sendGain,
   sendTarget,
@@ -35,6 +39,7 @@ import type {
   MotionCategory,
   MotionFileDetail,
   MotionLibrarySnapshot,
+  SensorState,
   SystemStatus,
   TelemetryEvent,
   TelemetryRecordingScope,
@@ -79,6 +84,7 @@ export const useControlStore = defineStore('control', () => {
   const loading = ref(false);
   const socket = ref<WebSocket | null>(null);
   const motionLibrary = ref<MotionLibrarySnapshot>({ fixed: [], custom: [] });
+  const sensors = ref<SensorState | null>(null);
   const telemetryRecording = ref<TelemetryRecordingStatus>({
     is_recording: false,
     current_log_name: null,
@@ -208,8 +214,10 @@ export const useControlStore = defineStore('control', () => {
         system: SystemStatus;
         actuators: ActuatorState[];
         legs: LegPreview[];
+        sensors?: SensorState;
       };
       system.value = payload.system;
+      sensors.value = payload.sensors ?? null;
       telemetryRecording.value = {
         ...telemetryRecording.value,
         is_recording: payload.system.telemetry_recording,
@@ -261,6 +269,11 @@ export const useControlStore = defineStore('control', () => {
       return;
     }
 
+    if (event.type === 'sensor_state') {
+      sensors.value = (event.payload as { sensors: SensorState }).sensors;
+      return;
+    }
+
     if (event.type === 'telemetry' || event.type === 'actuator_state' || event.type === 'gain_response') {
       const actuator = (event.payload as { actuator: ActuatorState }).actuator;
       pendingActuators.set(actuator.actuator_id, actuator);
@@ -278,18 +291,20 @@ export const useControlStore = defineStore('control', () => {
   async function refresh(): Promise<void> {
     loading.value = true;
     try {
-      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus] = await Promise.all([
+      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot] = await Promise.all([
         fetchHealth(),
         fetchActuators(),
         fetchLegPreviews(),
         fetchMotionLibrary(),
         fetchTelemetryRecordingStatus(),
+        fetchSensors(),
       ]);
       system.value = health.system;
       actuators.value = actuatorSnapshot.items;
       legs.value = legSnapshot.items;
       resetActuatorHistories(actuatorSnapshot.items);
       motionLibrary.value = librarySnapshot;
+      sensors.value = sensorSnapshot.item;
       telemetryRecording.value = recordingStatus;
       syncSelectedTargets();
     } finally {
@@ -493,6 +508,21 @@ export const useControlStore = defineStore('control', () => {
     telemetryRecording.value = await fetchTelemetryRecordingStatus();
   }
 
+  async function setImuLevelCalibration(): Promise<void> {
+    const response = await calibrateImuLevel();
+    sensors.value = response.item;
+  }
+
+  async function setImuGyroZeroCalibration(sampleCount = 60): Promise<void> {
+    const response = await calibrateImuGyroZero(sampleCount);
+    sensors.value = response.item;
+  }
+
+  async function clearImuCalibration(): Promise<void> {
+    const response = await resetImuCalibration();
+    sensors.value = response.item;
+  }
+
   async function beginTelemetryRecording(scope: TelemetryRecordingScope, actuatorId?: number): Promise<void> {
     telemetryRecording.value = await startTelemetryRecording({
       scope,
@@ -541,6 +571,7 @@ export const useControlStore = defineStore('control', () => {
     loading,
     loadMotionFile,
     motionLibrary,
+    sensors,
     telemetryRecording,
     refresh,
     refreshTelemetryRecording,
@@ -555,7 +586,10 @@ export const useControlStore = defineStore('control', () => {
     selectedActuator,
     selectedActuatorHistory,
     selectedActuatorId,
+    setImuGyroZeroCalibration,
+    setImuLevelCalibration,
     beginTelemetryRecording,
+    clearImuCalibration,
     endTelemetryRecording,
     downloadLatestTelemetryRecording,
     submitGain,

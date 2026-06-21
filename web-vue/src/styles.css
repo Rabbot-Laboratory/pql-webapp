@@ -283,35 +283,6 @@ textarea {
   padding-top: 0;
 }
 
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.overview-grid-compact {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.overview-value {
-  display: grid;
-  gap: 6px;
-}
-
-.overview-value strong {
-  font-size: 1.2rem;
-}
-
-.event-timeline .p-timeline-event-content {
-  padding-bottom: 1rem;
-}
-
-.event-item {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.event-item p,
 .drawer-lead,
 .field-helper {
   margin: 0;
@@ -1013,12 +984,10 @@ textarea {
   vertical-align: middle;
 }
 
-.overview-card .p-card-body,
 .leg-stage-card .p-card-body {
   padding: 0.75rem;
 }
 
-.overview-card .p-card-content,
 .leg-stage-card .p-card-content {
   padding-top: 0;
 }
@@ -1040,13 +1009,106 @@ textarea {
   font-size: 1.5rem;
 }
 
-.placeholder-stage {
-  margin: 0 0 0.75rem;
-  font-weight: 700;
-}
-
 .pressure-card .p-card-body {
   padding: 0.9rem;
+}
+
+.sensor-section {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.sensor-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sensor-section-header h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: #f2f4f7;
+}
+
+.sensor-state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  color: #aeb8c2;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.sensor-state-pill.is-enabled {
+  border-color: rgba(102, 252, 241, 0.28);
+  color: #66fcf1;
+}
+
+.sensor-state-pill.is-disabled {
+  color: #7f8b96;
+}
+
+.sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sensor-tile {
+  display: grid;
+  gap: 8px;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 252, 241, 0.12);
+  background: rgba(12, 15, 19, 0.76);
+}
+
+.sensor-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sensor-tile p,
+.sensor-tile small {
+  margin: 0;
+  color: #aeb8c2;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sensor-tile small {
+  color: #ffb4a8;
+}
+
+.adc-channel-list {
+  display: grid;
+  gap: 6px;
+}
+
+.adc-channel-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 5rem;
+  gap: 8px;
+  align-items: baseline;
+  color: #c8d1da;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.adc-channel-row strong {
+  color: #f2f4f7;
+}
+
+.adc-channel-row em {
+  color: #aeb8c2;
+  font-style: normal;
+  text-align: right;
 }
 
 .pressure-grid {
@@ -1104,7 +1166,6 @@ textarea {
   background: linear-gradient(90deg, #8a5cf6 0%, #66fcf1 100%);
 }
 
-.placeholder-list,
 .drawer-list {
   margin: 0;
   padding-left: 1.2rem;
@@ -1141,16 +1202,136 @@ textarea {
   gap: 0.75rem;
 }
 
+.sensor-calibration-card,
+.sensor-calibration-card .p-card-body,
+.sensor-calibration-card .p-card-content {
+  height: 100%;
+}
+
+.sensor-calibration-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+  grid-template-rows: auto 1fr;
+  gap: 1rem;
+}
+
+.sensor-calibration-status,
+.sensor-calibration-actions,
+.calibration-values {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+}
+
+.sensor-calibration-status {
+  grid-row: span 2;
+}
+
+.sensor-calibration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.sensor-calibration-header h3,
+.sensor-calibration-actions h3,
+.calibration-values h3 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.sensor-calibration-header p,
+.sensor-calibration-actions p {
+  margin: 0.25rem 0 0;
+  color: #94a3b8;
+}
+
+.orientation-readout {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.16), rgba(14, 165, 233, 0.12));
+}
+
+.orientation-readout.is-muted {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.orientation-readout span,
+.sensor-raw-grid span,
+.calibration-values span {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.orientation-readout strong {
+  color: #f8fafc;
+  font-size: clamp(1rem, 2vw, 1.45rem);
+}
+
+.sensor-raw-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.sensor-raw-grid article,
+.calibration-values div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 16px;
+  background: rgba(11, 12, 16, 0.55);
+}
+
+.sensor-raw-grid strong,
+.calibration-values strong {
+  color: #f8fafc;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.92rem;
+}
+
+.sensor-error-text {
+  margin: 1rem 0 0;
+  color: #fca5a5;
+  font-weight: 700;
+}
+
+.sensor-calibration-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.calibration-action-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 18px;
+  background: rgba(11, 12, 16, 0.45);
+}
+
+.calibration-action-card.is-danger {
+  background: rgba(127, 29, 29, 0.22);
+}
+
+.calibration-action-card .p-button {
+  justify-content: center;
+}
+
+.calibration-values {
+  display: grid;
+  gap: 0.65rem;
+}
+
 @media (max-width: 1100px) {
-  .overview-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .cockpit-main-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .overview-grid-compact {
     grid-template-columns: 1fr;
   }
 
@@ -1164,6 +1345,18 @@ textarea {
 
   .pressure-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sensor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sensor-calibration-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sensor-calibration-status {
+    grid-row: auto;
   }
 }
 
@@ -1294,10 +1487,6 @@ textarea {
     min-width: 0;
   }
 
-  .overview-grid {
-    grid-template-columns: 1fr;
-  }
-
   .legs-splitter {
     min-height: auto;
   }
@@ -1309,6 +1498,21 @@ textarea {
 
   .pressure-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sensor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sensor-calibration-layout {
+    gap: 8px;
+  }
+
+  .sensor-calibration-status,
+  .sensor-calibration-actions,
+  .calibration-values {
+    padding: 0.75rem;
+    border-radius: 16px;
   }
 
   .control-summary-grid {
