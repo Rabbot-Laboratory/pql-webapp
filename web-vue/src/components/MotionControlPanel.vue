@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
     <div class="motion-grid">
       <Card class="motion-card">
         <template #title>Motion Library</template>
-        <template #subtitle>`motion/fixed` と `motion/custom` の CSV を管理します。</template>
+        <template #subtitle>`Motion/Fixed Motion` と `Motion/Custom Motion` の CSV を管理します。</template>
         <template #content>
           <div class="motion-library-group">
             <div class="motion-library-header">

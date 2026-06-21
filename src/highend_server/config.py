@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     websocket_ping_interval_sec: float = Field(default=15.0, gt=0.0)
     csv_default_interval_sec: float = Field(default=1.0 / 30.0, gt=0.0)
     allowed_origin_regex: str = r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?"
-    motion_root_dir: str = "motion"
-    fixed_motion_dir_name: str = "fixed"
-    custom_motion_dir_name: str = "custom"
+    motion_root_dir: str = "Motion"
+    fixed_motion_dir_name: str = "Fixed Motion"
+    custom_motion_dir_name: str = "Custom Motion"
     telemetry_log_root_dir: str = "Logs"
     telemetry_log_dir_name: str = "telemetry"
 

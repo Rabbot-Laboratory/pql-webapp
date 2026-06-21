@@ -301,6 +301,7 @@ class StubSerialGateway(SerialGateway):
     def __init__(self, settings: Settings) -> None:
         super().__init__()
         self.settings = settings
+        self.sent_frames: list[tuple[PortRole, int]] = []
         self._telemetry_task: asyncio.Task[None] | None = None
         self._actuators: dict[PortRole, list[EmulatedActuator]] = {
             PortRole.FRONT: [EmulatedActuator() for _ in range(4)],
@@ -323,6 +324,7 @@ class StubSerialGateway(SerialGateway):
         self.connection_state = ConnectionState.DISCONNECTED
 
     async def send_frame(self, port_role: PortRole, frame: int) -> None:
+        self.sent_frames.append((port_role, frame))
         await self._handle_outbound_frame(port_role, frame)
 
     async def _handle_outbound_frame(self, port_role: PortRole, frame: int) -> None:

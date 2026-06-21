@@ -9,6 +9,19 @@ dist/
 build/
 
 # Duplicate backend (Python source lives in src/, not inside web-vue/)
+web-vue/docs/
+web-vue/Motion/
+web-vue/pql-a00_description/
+web-vue/PQL-LG00-A1_description/
+web-vue/scripts/
+web-vue/tests/
+web-vue/web/
+web-vue/Highend_Ctrl_mod.py
+web-vue/layout.kv
+web-vue/Native_GuiApp_main2.py
+web-vue/pyproject.toml
+web-vue/Rabbot-labo*.png
+web-vue/build.log
 web-vue/src/highend_server/
 web-vue/src/highend_control_server.egg-info/
 
@@ -17,45 +30,28 @@ web-vue/node_modules/
 web-vue/dist/
 
 # Logs
+Logs/
 Logs/telemetry/
 web-vue/Logs/
 
+# User-created motions are local/runtime data; keep only the directory marker.
+Motion/Custom Motion/*
+!Motion/Custom Motion/.gitkeep
+
 # Pytest
 .pytest_cache/
+
+# Local reference caches
+docs/llms*.txt
+web-vue/docs/llms*.txt
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Local config
+# Secrets / local config
+*.local.json
 .claude/
 .highend_windows_ports.json
-*.local.json
-
-# Legacy files (superseded by web app)
-Highend_Ctrl_mod.py
-Native_GuiApp_main2.py
-layout.kv
-web/
-web-vue/web/
-web-vue/build.log
-
-# Duplicates inside web-vue/ (canonical copies live at project root)
-web-vue/Motion/
-web-vue/motion/
-web-vue/PQL-LG00-A1_description/
-web-vue/pql-lg00-a1_description/
-web-vue/pql-a00_description/
-web-vue/docs/
-web-vue/pyproject.toml
-web-vue/scripts/
-web-vue/tests/
-web-vue/Rabbot-labo*.png
-
-# Motion: custom motions are user-generated, not tracked
-Motion/
-motion/custom/
-
-# LLM context docs (generated, not source)
-docs/llms.txt
-docs/llms-full.txt
+.git.broken-*/
+Rabbot-labo*.png

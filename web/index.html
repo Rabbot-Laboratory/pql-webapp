@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Highend Control Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Air Compressor Robot</p>
+        <h1>Highend Control Dashboard</h1>
+        <p class="subtitle">Browser-based monitoring and command surface for the Raspberry Pi control server.</p>
+      </div>
+      <div class="hero-actions">
+        <span id="ws-status" class="status-pill is-pending">WebSocket connecting</span>
+        <button id="refresh-button" class="button button-secondary" type="button">Refresh Snapshot</button>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel panel-system">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-label">System</p>
+            <h2>Server Status</h2>
+          </div>
+          <span id="health-pill" class="status-pill is-pending">Checking health</span>
+        </div>
+        <div class="system-grid">
+          <article class="metric-card">
+            <span class="metric-label">Connection</span>
+            <strong id="connection-state">Unknown</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Playback</span>
+            <strong id="playback-state">Unknown</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Mode</span>
+            <strong id="emulation-state">Unknown</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Updated</span>
+            <strong id="updated-at">-</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel panel-preview">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-label">Leg Preview</p>
+            <h2>Focused Leg Motion</h2>
+            <p class="subtitle panel-subtitle">Single-leg articulated preview driven by live telemetry and target position.</p>
+          </div>
+          <label class="selector-field">
+            <span>Focused leg</span>
+            <select id="leg-selector"></select>
+          </label>
+        </div>
+        <div class="leg-preview-layout">
+          <div class="leg-preview-stage">
+            <div class="preview-stage-meta">
+              <div>
+                <p class="preview-kicker">Joint View</p>
+                <h3 id="focused-leg-title">Front Right</h3>
+              </div>
+              <span id="preview-updated-at" class="status-pill is-pending">Waiting for telemetry</span>
+            </div>
+            <svg id="leg-preview-svg" class="leg-preview-svg" viewBox="0 0 320 300" aria-label="Focused leg preview">
+              <defs>
+                <linearGradient id="previewBackgroundGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#f8fbf6"></stop>
+                  <stop offset="100%" stop-color="#dfece3"></stop>
+                </linearGradient>
+                <linearGradient id="currentLinkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#1b7f5b"></stop>
+                  <stop offset="100%" stop-color="#0e5b43"></stop>
+                </linearGradient>
+                <linearGradient id="targetLinkGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#d98b12"></stop>
+                  <stop offset="100%" stop-color="#f3bc61"></stop>
+                </linearGradient>
+              </defs>
+              <rect class="preview-backdrop" x="0" y="0" width="320" height="300" rx="28"></rect>
+              <path class="preview-ground" d="M40 246 Q160 210 280 246"></path>
+              <line class="preview-target-link" id="target-hip-link" x1="160" y1="64" x2="160" y2="148"></line>
+              <line class="preview-target-link" id="target-knee-link" x1="160" y1="148" x2="160" y2="232"></line>
+              <line class="preview-current-link" id="current-hip-link" x1="160" y1="64" x2="160" y2="148"></line>
+              <line class="preview-current-link" id="current-knee-link" x1="160" y1="148" x2="160" y2="232"></line>
+              <circle class="preview-joint preview-joint-base" cx="160" cy="64" r="12"></circle>
+              <circle class="preview-joint preview-joint-target" id="target-knee-joint" cx="160" cy="148" r="10"></circle>
+              <circle class="preview-joint preview-joint-target" id="target-foot-joint" cx="160" cy="232" r="9"></circle>
+              <circle class="preview-joint preview-joint-current" id="current-knee-joint" cx="160" cy="148" r="10"></circle>
+              <circle class="preview-joint preview-joint-current" id="current-foot-joint" cx="160" cy="232" r="9"></circle>
+            </svg>
+          </div>
+          <div class="leg-preview-inspector">
+            <article class="preview-stat-card">
+              <span class="preview-stat-label">Hip</span>
+              <strong id="hip-position">0</strong>
+              <span id="hip-joint-name">rev_fr2</span>
+              <span id="hip-angle">0.0 deg</span>
+              <small id="hip-target">Target 0</small>
+            </article>
+            <article class="preview-stat-card">
+              <span class="preview-stat-label">Knee</span>
+              <strong id="knee-position">0</strong>
+              <span id="knee-joint-name">rev_fr3</span>
+              <span id="knee-angle">0.0 deg</span>
+              <small id="knee-target">Target 0</small>
+            </article>
+            <article class="preview-stat-card">
+              <span class="preview-stat-label">Sync</span>
+              <strong id="preview-sync-state">Awaiting data</strong>
+              <span id="preview-leg-label">front right</span>
+              <small id="preview-joint-mapping">Current line is live telemetry, dashed line is target position.</small>
+            </article>
+            <article class="preview-stat-card">
+              <span class="preview-stat-label">Fixed Joint</span>
+              <strong id="fixed-joint-name">rev_fr1</strong>
+              <span id="fixed-joint-angle">0.0 deg</span>
+              <small>Root joint is fixed for now while rev_*2 and rev_*3 follow hip and knee.</small>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel-log">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-label">Events</p>
+            <h2>Live Stream</h2>
+          </div>
+        </div>
+        <ul id="event-log" class="event-log"></ul>
+      </section>
+
+      <section class="panel panel-actuators">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-label">Actuators</p>
+            <h2>Targets and Telemetry</h2>
+          </div>
+        </div>
+        <div id="actuator-grid" class="actuator-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <template id="actuator-card-template">
+    <article class="actuator-card">
+      <div class="actuator-header">
+        <div>
+          <p class="actuator-label"></p>
+          <h3 class="actuator-title"></h3>
+        </div>
+        <span class="actuator-port"></span>
+      </div>
+      <dl class="telemetry-grid">
+        <div>
+          <dt>Position</dt>
+          <dd class="telemetry-position">0</dd>
+        </div>
+        <div>
+          <dt>Voltage</dt>
+          <dd class="telemetry-voltage">0</dd>
+        </div>
+        <div>
+          <dt>Command</dt>
+          <dd class="telemetry-command">0</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd class="telemetry-updated">-</dd>
+        </div>
+      </dl>
+      <form class="target-form">
+        <label>
+          <span>Mode</span>
+          <select name="mode">
+            <option value="position">Position</option>
+            <option value="command">Command</option>
+          </select>
+        </label>
+        <label>
+          <span>Value</span>
+          <input name="value" type="number" min="0" max="4095" step="1" value="2048">
+        </label>
+        <p class="range-hint">Position: 0-4095 / Command: 0-1800</p>
+        <button class="button button-primary" type="submit">Send Target</button>
+      </form>
+      <p class="card-feedback" aria-live="polite"></p>
+    </article>
+  </template>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

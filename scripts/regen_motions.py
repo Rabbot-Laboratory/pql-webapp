@@ -18,7 +18,7 @@ from pathlib import Path
 # Paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "motion" / "fixed"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "Motion" / "Fixed Motion"
 
 # ---------------------------------------------------------------------------
 # Easing
