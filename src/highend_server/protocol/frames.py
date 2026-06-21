@@ -31,6 +31,9 @@ class GainFrame:
     capture_min: int
 
 
+def format_bits(frame: int, bits: int = 64) -> str:
+    return format(frame, f"0{bits}b")
+
 
 def decode_transport_payload(raw_line: bytes, byteorder: str = "little") -> int:
     raw_b64 = raw_line.decode("ascii").strip()

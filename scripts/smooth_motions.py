@@ -147,7 +147,7 @@ def process_file(path: Path, config: MotionConfig) -> None:
 
 
 def main() -> None:
-    fixed_motion_dir = Path(__file__).resolve().parents[1] / "motion" / "fixed"
+    fixed_motion_dir = Path(__file__).resolve().parents[1] / "Motion" / "Fixed Motion"
     print(f"対象ディレクトリ: {fixed_motion_dir}\n")
 
     for name, config in MOTION_CONFIGS.items():

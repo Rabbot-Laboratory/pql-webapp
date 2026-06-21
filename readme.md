@@ -1,140 +1,163 @@
-# pql-webapp
+# Air Compressor Robot
 
-空圧駆動4脚ロボット（PQL-A00）のRaspberry Pi側制御サーバーおよびWebダッシュボードです。
+This repository currently contains two generations of the control stack.
 
-- **バックエンド**: FastAPI（Python） — ESP32とシリアル通信し、WebSocket経由でブラウザへテレメトリを配信
-- **フロントエンド**: Vue 3 + TypeScript（`web-vue/`）
+- Legacy Raspberry Pi control module: `Highend_Ctrl_mod.py`
+- Legacy native GUI: `Native_GuiApp_main2.py`
+- New browser-first server scaffold: `src/highend_server/`
+- Production-oriented Vue UI scaffold: `web-vue/`
 
-## ディレクトリ構成
+## New server scaffold
 
-```
-src/highend_server/
-  api/           REST APIルートおよびWebSocket配信
-  application/   ロボット制御ユースケース
-  domain/        共通データモデル
-  protocol/      ESP32との64bitフレームエンコード/デコード
-  transport/     シリアル通信ゲートウェイ
-web-vue/         Vue 3フロントエンド
-motion/
-  fixed/         固定モーションCSV（trot, crawl, pace, bound）
-  custom/        ユーザー定義モーション（実行時に生成、Git管理外）
-pql-a00_description/    PQL-A00 ROSロボット記述（URDF/メッシュ）
-pql-lg00-a1_description/ PQL-LG00-A1 ROSロボット記述（URDF/メッシュ）
-tests/           バックエンド単体テスト
-scripts/         開発・メンテナンス用スクリプト
-docs/            設計ドキュメント
-```
-
-## セットアップ
-
-### バックエンド
-
-依存関係をインストール（開発用）:
+Install the new server in editable mode:
 
 ```bash
-pip install -e .[dev]
+python -m pip install -e .[dev]
 ```
 
-### フロントエンド
-
-```bash
-cd web-vue
-npm install
-```
-
-## 起動方法
-
-### Raspberry Pi（本番）
+Run the API server:
 
 ```bash
 python -m highend_server
 ```
 
-シリアルポートはデフォルトで以下を使用します:
+Run the demo server without hardware:
 
-- `/dev/ttyUSB-Front`（前脚側ESP32）
-- `/dev/ttyUSB-Back`（後脚側ESP32）
+```bash
+python -m highend_server --demo
+```
 
-`systemd` による自動起動を推奨します。
+## Runtime flows
 
-### Windows（開発・検証用）
+- Raspberry Pi production flow:
+  - Keep using `python -m highend_server`
+  - The server expects Linux-side stable names such as `/dev/ttyUSB-Front` and `/dev/ttyUSB-Back`
+  - `systemd` auto-start remains the recommended production setup
 
-初回のみ、COMポートとESP32の対応を登録:
+- Windows validation flow:
+  - Use the Windows launcher instead of calling `python -m highend_server` directly
+  - The launcher resolves Front/Back from saved COM fingerprints and then sets
+    `HIGHEND_FRONT_PORT_NAME` / `HIGHEND_BACK_PORT_NAME` automatically
+
+First-time Windows setup:
 
 ```powershell
 python scripts/detect_windows_ports.py list
 python scripts/detect_windows_ports.py bind --front COM3 --back COM4
 ```
 
-以降の起動:
+After that, launch from Windows with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run_windows.ps1
 ```
 
-### ハードウェアなしでの動作確認（エミュレーションモード）
+Or run the Windows launcher directly:
 
-```bash
-python -m highend_server --demo
+```powershell
+python scripts/detect_windows_ports.py launch
 ```
 
-または環境変数で指定:
+Windows demo launch:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run_windows.ps1 -Demo
+```
+
+Development mode without hardware:
 
 ```bash
 HIGHEND_EMULATE_DEVICES=true python -m highend_server
 ```
 
-PowerShellの場合:
+PowerShell example:
 
 ```powershell
 $env:HIGHEND_EMULATE_DEVICES = "true"
 python -m highend_server
 ```
 
-エミュレーションモードでは、ダミーのESP32として動作します:
+PowerShell demo shortcut:
 
-- 偽のセンサーテレメトリをWebSocket経由で配信
-- アクチュエータへのコマンドをダミー値で処理
-- ブラウザダッシュボードで脚の姿勢プレビューを表示
-
-### フロントエンド開発サーバー
-
-```bash
-cd web-vue
-npm run dev
+```powershell
+python -m highend_server --demo
 ```
 
-Viteの開発サーバーが起動し、APIリクエストは自動的に `http://127.0.0.1:8000` へプロキシされます。
+Then open the browser dashboard:
 
-ブラウザでアクセス:
-
-```
-http://localhost:5173
-```
-
-本番ビルド（`web-vue/dist/`）が存在する場合、FastAPIが自動的に静的ファイルとして配信します:
-
-```
+```text
 http://<raspberry-pi-host>:8000/
 ```
 
-## 主なAPIエンドポイント
+## Vue UI scaffold
 
-| メソッド | パス | 説明 |
-|---|---|---|
-| `GET` | `/api/health` | サーバー死活確認 |
-| `GET` | `/api/actuators` | 全アクチュエータ状態取得 |
-| `GET` | `/api/preview/legs` | 脚プレビュー取得 |
-| `POST` | `/api/actuators/{id}/target` | 目標角度送信 |
-| `POST` | `/api/actuators/{id}/gain` | PIDゲイン設定 |
-| `POST` | `/api/motions/fixed` | 固定モーション再生 |
-| `GET` | `/api/motions/library` | モーションライブラリ一覧 |
-| `POST` | `/api/csv/playback/start` | CSVモーション再生開始 |
-| `POST` | `/api/csv/playback/stop` | CSVモーション再生停止 |
-| `WS` | `/api/ws` | テレメトリWebSocket |
+The staged production UI now lives in `web-vue/`.
 
-## テスト
+Install frontend dependencies:
 
 ```bash
-pytest
+cd web-vue
+npm install
 ```
+
+Run the Vite development server:
+
+```bash
+npm run dev
+```
+
+When `web-vue/dist` exists, the FastAPI app serves it automatically instead of
+the legacy `web/` directory.
+
+Main endpoints:
+
+- `GET /api/health`
+- `GET /api/actuators`
+- `GET /api/preview/legs`
+- `POST /api/actuators/{id}/target`
+- `POST /api/actuators/{id}/gain`
+- `POST /api/actuators/{id}/gain/request`
+- `POST /api/actuators/{id}/capture`
+- `POST /api/motions/fixed`
+- `POST /api/csv/playback/start`
+- `POST /api/csv/playback/stop`
+- `WS /api/ws`
+
+## Directory layout
+
+```text
+src/highend_server/
+  api/           FastAPI routes and WebSocket delivery
+  application/   Robot control use cases
+  domain/        Shared application models
+  protocol/      64-bit ESP32 frame encoding and decoding
+  transport/     Serial gateway boundary
+tests/           Protocol-focused unit tests
+web/             Future browser client
+```
+
+## Migration intent
+
+The new structure separates:
+
+- `protocol`: 64-bit ESP32 frame encoding and decoding
+- `transport`: serial gateway boundary
+- `application`: robot control use cases
+- `api`: REST and WebSocket delivery to browser clients
+
+The current `StubSerialGateway` is intentional. It lets the API and future web
+UI be built before wiring in the real Raspberry Pi serial transport.
+
+When `HIGHEND_EMULATE_DEVICES` is not set, the server now uses the real
+`PySerialGateway` and tries to open:
+
+- `HIGHEND_FRONT_PORT_NAME` (default: `/dev/ttyUSB-Front`)
+- `HIGHEND_BACK_PORT_NAME` (default: `/dev/ttyUSB-Back`)
+
+When `HIGHEND_EMULATE_DEVICES=true`, the stub gateway acts like a dummy ESP32
+pair:
+
+- periodic fake sensor telemetry is streamed over WebSocket
+- target commands update the dummy actuator values
+- gain requests return fake gain and capture values
+- the browser dashboard renders a focused leg preview from the emulated joint state
