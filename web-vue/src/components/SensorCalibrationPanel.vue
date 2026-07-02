@@ -3,7 +3,7 @@ import Button from 'primevue/button';
 import Card from 'primevue/card';
 import Tag from 'primevue/tag';
 
-import type { ImuOrientation, ImuVector, SensorState } from '@/types/control';
+import type { ImuOrientation, ImuQuaternion, ImuVector, SensorState } from '@/types/control';
 
 defineProps<{
   sensors: SensorState | null;
@@ -22,9 +22,25 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
 
 function formatOrientation(orientation: ImuOrientation | null | undefined): string {
   if (!orientation) {
-    return 'Roll - / Pitch -';
+    return 'Roll - / Pitch - / Yaw -';
   }
-  return `Roll ${formatNumber(orientation.roll_deg)} deg / Pitch ${formatNumber(orientation.pitch_deg)} deg`;
+  return [
+    `Roll ${formatNumber(orientation.roll_deg)} deg`,
+    `Pitch ${formatNumber(orientation.pitch_deg)} deg`,
+    `Yaw ${formatNumber(orientation.yaw_deg)} deg`,
+  ].join(' / ');
+}
+
+function formatQuaternion(quaternion: ImuQuaternion | null | undefined): string {
+  if (!quaternion) {
+    return 'W - / X - / Y - / Z -';
+  }
+  return [
+    `W ${formatNumber(quaternion.w, 4)}`,
+    `X ${formatNumber(quaternion.x, 4)}`,
+    `Y ${formatNumber(quaternion.y, 4)}`,
+    `Z ${formatNumber(quaternion.z, 4)}`,
+  ].join(' / ');
 }
 
 function formatVector(vector: ImuVector | null | undefined, unit: string): string {
@@ -79,6 +95,18 @@ function formatVector(vector: ImuVector | null | undefined, unit: string): strin
             <article>
               <span>Mag</span>
               <strong>{{ formatVector(sensors?.imu.mag_raw, 'raw') }}</strong>
+            </article>
+            <article>
+              <span>Gravity</span>
+              <strong>{{ formatVector(sensors?.imu.gravity_g, 'g') }}</strong>
+            </article>
+            <article>
+              <span>Linear Accel</span>
+              <strong>{{ formatVector(sensors?.imu.linear_accel_g, 'g') }}</strong>
+            </article>
+            <article>
+              <span>Quaternion</span>
+              <strong>{{ formatQuaternion(sensors?.imu.quaternion) }}</strong>
             </article>
           </div>
 

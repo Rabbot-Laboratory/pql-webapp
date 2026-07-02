@@ -8,12 +8,14 @@ import SplitterPanel from 'primevue/splitterpanel';
 import Tag from 'primevue/tag';
 
 import RobotModelViewport from '@/components/RobotModelViewport.vue';
-import type { LegId, LegPreview } from '@/types/control';
+import type { ImuOrientation, ImuQuaternion, LegId, LegPreview } from '@/types/control';
 import { legLabel } from '@/utils/i18n';
 
 const props = defineProps<{
   legs: LegPreview[];
   focusedLegId: LegId;
+  imuQuaternion?: ImuQuaternion | null;
+  imuOrientation?: ImuOrientation | null;
   compact?: boolean;
 }>();
 
@@ -59,7 +61,12 @@ function degrees(radians: number): string {
     <Card v-if="compact" class="leg-stage-card is-compact">
       <template #content>
         <div class="leg-stage compact-stage">
-          <RobotModelViewport :legs="legs" :focused-leg-id="focusedLegId" />
+          <RobotModelViewport
+            :legs="legs"
+            :focused-leg-id="focusedLegId"
+            :imu-quaternion="imuQuaternion"
+            :imu-orientation="imuOrientation"
+          />
           <div v-if="focusedLeg" class="compact-leg-summary">
             <Tag severity="contrast" :value="`${focusedLeg.hip.joint_name}: ${degrees(focusedLeg.hip.angle_rad)}`" />
             <Tag severity="info" :value="`${focusedLeg.knee.joint_name}: ${degrees(focusedLeg.knee.angle_rad)}`" />
@@ -79,7 +86,12 @@ function degrees(radians: number): string {
                   <h3>{{ focusedLeg ? legLabel(focusedLeg.leg_id) : '脚データを読み込み中' }}</h3>
                 </div>
               </div>
-              <RobotModelViewport :legs="legs" :focused-leg-id="focusedLegId" />
+              <RobotModelViewport
+                :legs="legs"
+                :focused-leg-id="focusedLegId"
+                :imu-quaternion="imuQuaternion"
+                :imu-orientation="imuOrientation"
+              />
             </div>
           </template>
         </Card>
