@@ -5,11 +5,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import URDFLoader, { type URDFRobot } from 'urdf-loader';
 import { XacroLoader } from 'xacro-parser';
 
-import type { LegId, LegPreview } from '@/types/control';
+import type { ImuOrientation, ImuQuaternion, LegId, LegPreview } from '@/types/control';
 
 const props = defineProps<{
   legs: LegPreview[];
   focusedLegId: LegId;
+  imuQuaternion?: ImuQuaternion | null;
+  imuOrientation?: ImuOrientation | null;
 }>();
 
 const DESCRIPTION_PACKAGE_URL = '/robot-description/pql-a00/';
@@ -98,6 +100,21 @@ const poseSignature = computed(() =>
     )
     .join('|'),
 );
+
+const imuSignature = computed(() => {
+  if (props.imuQuaternion) {
+    return [
+      props.imuQuaternion.w.toFixed(4),
+      props.imuQuaternion.x.toFixed(4),
+      props.imuQuaternion.y.toFixed(4),
+      props.imuQuaternion.z.toFixed(4),
+    ].join(':');
+  }
+  if (!props.imuOrientation) {
+    return 'none';
+  }
+  return `${props.imuOrientation.roll_deg.toFixed(3)}:${props.imuOrientation.pitch_deg.toFixed(3)}`;
+});
 
 function setMeshEmissive(mesh: THREE.Mesh, color: number, intensity: number): void {
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -195,6 +212,27 @@ function renderScene(): void {
   renderer.render(scene, camera);
 }
 
+function applyImuOrientation(): void {
+  if (props.imuQuaternion) {
+    robotRoot.quaternion.set(
+      props.imuQuaternion.x,
+      props.imuQuaternion.y,
+      props.imuQuaternion.z,
+      props.imuQuaternion.w,
+    );
+    return;
+  }
+
+  if (!props.imuOrientation) {
+    robotRoot.rotation.set(0, 0, 0);
+    return;
+  }
+
+  const roll = THREE.MathUtils.degToRad(props.imuOrientation.roll_deg);
+  const pitch = THREE.MathUtils.degToRad(props.imuOrientation.pitch_deg);
+  robotRoot.rotation.set(pitch, roll, 0, 'XYZ');
+}
+
 function applyPose(): void {
   if (!robot) {
     return;
@@ -208,6 +246,7 @@ function applyPose(): void {
   }
 
   applyFocusedHighlight();
+  applyImuOrientation();
   renderScene();
 }
 
@@ -317,7 +356,7 @@ onMounted(async () => {
   }
 });
 
-watch([poseSignature, () => props.focusedLegId], () => {
+watch([poseSignature, () => props.focusedLegId, imuSignature], () => {
   applyPose();
 });
 

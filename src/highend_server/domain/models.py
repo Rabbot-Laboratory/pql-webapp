@@ -159,6 +159,14 @@ class ImuVector(BaseModel):
 class ImuOrientation(BaseModel):
     roll_deg: float
     pitch_deg: float
+    yaw_deg: float | None = None
+
+
+class ImuQuaternion(BaseModel):
+    w: float
+    x: float
+    y: float
+    z: float
 
 
 class ImuCalibration(BaseModel):
@@ -171,9 +179,12 @@ class ImuCalibration(BaseModel):
 class Bmx055State(BaseModel):
     connection_state: SensorConnectionState = SensorConnectionState.DISABLED
     error: str | None = None
+    quaternion: ImuQuaternion | None = None
     accel_g: ImuVector | None = None
     gyro_dps: ImuVector | None = None
     mag_raw: ImuVector | None = None
+    gravity_g: ImuVector | None = None
+    linear_accel_g: ImuVector | None = None
     raw_orientation: ImuOrientation | None = None
     orientation: ImuOrientation | None = None
     calibration: ImuCalibration = Field(default_factory=ImuCalibration)

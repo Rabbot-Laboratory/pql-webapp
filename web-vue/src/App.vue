@@ -414,6 +414,8 @@ onBeforeUnmount(() => {
                   v-if="store.activeTab === 'dashboard'"
                   :focused-leg-id="store.focusedLegId"
                   :legs="store.legs"
+                  :imu-quaternion="store.sensors?.imu.quaternion ?? null"
+                  :imu-orientation="store.sensors?.imu.orientation ?? null"
                   compact
                   @update:focused-leg-id="store.selectLeg"
                 />
@@ -427,6 +429,8 @@ onBeforeUnmount(() => {
                 v-if="store.activeTab === 'legs'"
                 :focused-leg-id="store.focusedLegId"
                 :legs="store.legs"
+                :imu-quaternion="store.sensors?.imu.quaternion ?? null"
+                :imu-orientation="store.sensors?.imu.orientation ?? null"
                 @update:focused-leg-id="store.selectLeg"
               />
             </section>

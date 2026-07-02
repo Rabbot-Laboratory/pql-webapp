@@ -72,6 +72,14 @@ export interface ImuVector {
 export interface ImuOrientation {
   roll_deg: number;
   pitch_deg: number;
+  yaw_deg: number | null;
+}
+
+export interface ImuQuaternion {
+  w: number;
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface ImuCalibration {
@@ -84,9 +92,12 @@ export interface ImuCalibration {
 export interface Bmx055State {
   connection_state: SensorConnectionState;
   error: string | null;
+  quaternion: ImuQuaternion | null;
   accel_g: ImuVector | null;
   gyro_dps: ImuVector | null;
   mag_raw: ImuVector | null;
+  gravity_g: ImuVector | null;
+  linear_accel_g: ImuVector | null;
   raw_orientation: ImuOrientation | null;
   orientation: ImuOrientation | null;
   calibration: ImuCalibration;
