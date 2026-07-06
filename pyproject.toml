@@ -38,3 +38,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/highend_server/api/routes.py" = ["B008"]  # FastAPI Depends() in defaults is idiomatic

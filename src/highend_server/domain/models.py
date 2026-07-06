@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
-
 
 POSITION_MIN = 0
 POSITION_MAX = 4095
@@ -15,7 +14,7 @@ COMMAND_NEUTRAL = 900
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class PortRole(str, Enum):
@@ -173,7 +172,20 @@ class ImuCalibration(BaseModel):
     level_roll_deg: float = 0.0
     level_pitch_deg: float = 0.0
     gyro_offset_dps: ImuVector = Field(default_factory=lambda: ImuVector(x=0.0, y=0.0, z=0.0))
+    # Magnetometer hard-iron offset and diagonal soft-iron scale. Defaults are
+    # identity (offset 0, scale 1) so calibration files predating these fields
+    # load with no magnetometer correction applied.
+    mag_offset: ImuVector = Field(default_factory=lambda: ImuVector(x=0.0, y=0.0, z=0.0))
+    mag_scale: ImuVector = Field(default_factory=lambda: ImuVector(x=1.0, y=1.0, z=1.0))
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class MagCalibrationQuality(BaseModel):
+    sample_count: int
+    residual: float
+    coverage: float
+    offset: ImuVector
+    scale: ImuVector
 
 
 class Bmx055State(BaseModel):
@@ -189,6 +201,10 @@ class Bmx055State(BaseModel):
     orientation: ImuOrientation | None = None
     calibration: ImuCalibration = Field(default_factory=ImuCalibration)
     temperature_c: float | None = None
+    # Additive telemetry for the 100 Hz pipeline / magnetometer calibration flow.
+    sample_count: int = 0
+    mag_calibration_active: bool = False
+    mag_calibration_samples: int = 0
     updated_at: datetime = Field(default_factory=utc_now)
 
 
@@ -224,7 +240,7 @@ class SetTargetRequest(BaseModel):
     value: int = Field(ge=POSITION_MIN, le=POSITION_MAX)
 
     @model_validator(mode="after")
-    def validate_mode_specific_range(self) -> "SetTargetRequest":
+    def validate_mode_specific_range(self) -> SetTargetRequest:
         if self.mode is ControlMode.COMMAND and not (COMMAND_MIN <= self.value <= COMMAND_MAX):
             raise ValueError(f"Command targets must be between {COMMAND_MIN} and {COMMAND_MAX}")
         return self
@@ -255,6 +271,11 @@ class CsvPlaybackRequest(BaseModel):
     pressure_threshold: int = Field(default=0, ge=0, le=POSITION_MAX)
     step_timeout_sec: float = Field(default=1.5, gt=0.0)
     settle_time_sec: float = Field(default=0.1, ge=0.0)
+    # Phase 3: optional per-motion override for the attitude row-advance guard
+    # (degrees). None (default) falls back to `Settings.playback_attitude_guard_deg`;
+    # if that is also None the guard is disabled and behaviour is unchanged from
+    # pre-Phase-3 playback.
+    attitude_guard_deg: float | None = Field(default=None, ge=0.0)
 
 
 class MotionLibraryItem(BaseModel):
@@ -330,10 +351,56 @@ class StartTelemetryRecordingRequest(BaseModel):
     actuator_id: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def validate_scope_requirements(self) -> "StartTelemetryRecordingRequest":
+    def validate_scope_requirements(self) -> StartTelemetryRecordingRequest:
         if self.scope is TelemetryRecordingScope.SELECTED and self.actuator_id is None:
             raise ValueError("actuator_id is required when scope=selected")
         return self
+
+
+class StabilizationGains(BaseModel):
+    """Per-axis PID gains for attitude stabilization.
+
+    Defaults are deliberately conservative / near-minimal so the loop is gentle
+    on real hardware out of the box; on-robot tuning is expected. Integral gains
+    default to 0 (pure PD) to avoid any boot-time windup; enable a small ki
+    (~0.02-0.05) only after P/D behaviour is validated on the robot.
+    """
+
+    kp_roll: float = Field(default=1.5, ge=0.0, le=100.0)
+    ki_roll: float = Field(default=0.0, ge=0.0, le=50.0)
+    kd_roll: float = Field(default=0.3, ge=0.0, le=100.0)
+    kp_pitch: float = Field(default=1.5, ge=0.0, le=100.0)
+    ki_pitch: float = Field(default=0.0, ge=0.0, le=50.0)
+    kd_pitch: float = Field(default=0.3, ge=0.0, le=100.0)
+
+
+class StabilizationCorrection(BaseModel):
+    actuator_id: int
+    label: str
+    # Position-target offset (0..4095 units) added on top of the base target.
+    correction: float = 0.0
+
+
+class StabilizationState(BaseModel):
+    enabled: bool = False
+    # active == user-enabled AND healthy (not auto-disabled, fresh attitude).
+    active: bool = False
+    auto_disabled: bool = False
+    disabled_reason: str | None = None
+    gains: StabilizationGains = Field(default_factory=StabilizationGains)
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
+    roll_error_deg: float = 0.0
+    pitch_error_deg: float = 0.0
+    corrections: list[StabilizationCorrection] = Field(default_factory=list)
+    loop_rate_hz: float = 0.0
+    attitude_stale: bool = False
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class StabilizationRequest(BaseModel):
+    enabled: bool | None = None
+    gains: StabilizationGains | None = None
 
 
 class TelemetryEvent(BaseModel):

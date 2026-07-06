@@ -11,9 +11,8 @@ import serial
 
 from highend_server.config import Settings
 from highend_server.domain.models import COMMAND_NEUTRAL, ConnectionState, DeviceEnvelope, PortRole
-from highend_server.protocol.frames import encode_transport_payload
 from highend_server.protocol.constants import FORMAT_SENSOR_BASE
-
+from highend_server.protocol.frames import encode_transport_payload
 
 DeviceCallback = Callable[[DeviceEnvelope], Awaitable[None]]
 logger = logging.getLogger(__name__)

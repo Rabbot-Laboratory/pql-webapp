@@ -1,9 +1,18 @@
 import asyncio
 
-from highend_server.domain.models import ControlMode, DeviceEnvelope, PortRole
-from highend_server.protocol.frames import build_request_gain_frame, build_set_target_frame, decode_frame, decode_transport_payload
 from highend_server.config import Settings
-from highend_server.transport.serial_gateway import PySerialGateway, StubSerialGateway, build_gateway
+from highend_server.domain.models import ControlMode, DeviceEnvelope, PortRole
+from highend_server.protocol.frames import (
+    build_request_gain_frame,
+    build_set_target_frame,
+    decode_frame,
+    decode_transport_payload,
+)
+from highend_server.transport.serial_gateway import (
+    PySerialGateway,
+    StubSerialGateway,
+    build_gateway,
+)
 
 
 def test_build_gateway_returns_stub_in_emulation_mode() -> None:

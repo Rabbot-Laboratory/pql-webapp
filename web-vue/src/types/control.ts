@@ -86,6 +86,8 @@ export interface ImuCalibration {
   level_roll_deg: number;
   level_pitch_deg: number;
   gyro_offset_dps: ImuVector;
+  mag_offset: ImuVector;
+  mag_scale: ImuVector;
   updated_at: string;
 }
 
@@ -102,6 +104,48 @@ export interface Bmx055State {
   orientation: ImuOrientation | null;
   calibration: ImuCalibration;
   temperature_c: number | null;
+  sample_count: number;
+  mag_calibration_active: boolean;
+  mag_calibration_samples: number;
+  updated_at: string;
+}
+
+export interface MagCalibrationQuality {
+  sample_count: number;
+  residual: number;
+  coverage: number;
+  offset: ImuVector;
+  scale: ImuVector;
+}
+
+export interface StabilizationGains {
+  kp_roll: number;
+  ki_roll: number;
+  kd_roll: number;
+  kp_pitch: number;
+  ki_pitch: number;
+  kd_pitch: number;
+}
+
+export interface StabilizationCorrection {
+  actuator_id: number;
+  label: string;
+  correction: number;
+}
+
+export interface StabilizationState {
+  enabled: boolean;
+  active: boolean;
+  auto_disabled: boolean;
+  disabled_reason: string | null;
+  gains: StabilizationGains;
+  roll_deg: number;
+  pitch_deg: number;
+  roll_error_deg: number;
+  pitch_error_deg: number;
+  corrections: StabilizationCorrection[];
+  loop_rate_hz: number;
+  attitude_stale: boolean;
   updated_at: string;
 }
 
