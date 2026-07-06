@@ -1,0 +1,189 @@
+"""FastAPI route-wiring tests for the stabilization and IMU calibration API.
+
+The service behaviour itself is covered by test_stabilization.py /
+test_sensor_service.py; these tests exercise the ASGI stack end to end:
+dependency resolution via app.state, response_model serialization, and the
+HTTP error-code mapping (422 validation, 400 bad mag fit, 409 pipeline
+unavailable / stabilization interlock).
+"""
+
+from __future__ import annotations
+
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from highend_server.api.routes import router
+from highend_server.application.control_service import ControlService
+from highend_server.application.stabilization import StabilizationController
+from highend_server.config import Settings
+from highend_server.sensors.sensor_service import SensorService
+from highend_server.transport.serial_gateway import StubSerialGateway
+
+
+def _make_settings(tmp_path: Path, *, emulate_devices: bool) -> Settings:
+    # The emulated IMU pipeline runs when emulate_devices=True and
+    # sensors_enabled=False (sensors_enabled=True means real I2C hardware).
+    # With both False the sensor service starts nothing (pipeline is None).
+    # sensor_config_dir_name accepts an absolute path (Path join semantics),
+    # which keeps calibration JSON writes inside tmp_path instead of the repo.
+    return Settings(
+        emulate_devices=emulate_devices,
+        sensors_enabled=False,
+        sensor_config_dir_name=str(tmp_path / "config"),
+        sensor_publish_interval_sec=0.02,
+        imu_sample_rate_hz=200.0,
+        stabilization_rate_hz=50.0,
+    )
+
+
+def _make_app(settings: Settings) -> FastAPI:
+    async def event_sink(event: object) -> None:
+        return None
+
+    control_service = ControlService(
+        settings=settings, gateway=StubSerialGateway(settings), event_sink=event_sink
+    )
+    sensor_service = SensorService(settings=settings, event_sink=event_sink)
+    control_service.set_attitude_provider(sensor_service.latest_attitude)
+    control_service.set_level_offsets_provider(sensor_service.level_offsets)
+    stabilization_controller = StabilizationController(
+        settings=settings,
+        control_service=control_service,
+        attitude_provider=sensor_service.latest_attitude,
+        level_offsets_provider=sensor_service.level_offsets,
+        event_sink=event_sink,
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await control_service.connect()
+        await sensor_service.start()
+        await stabilization_controller.start()
+        try:
+            yield
+        finally:
+            await stabilization_controller.stop()
+            await sensor_service.stop()
+            await control_service.shutdown()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.settings = settings
+    app.state.control_service = control_service
+    app.state.sensor_service = sensor_service
+    app.state.stabilization_controller = stabilization_controller
+    app.include_router(router, prefix="/api")
+    return app
+
+
+@pytest.fixture()
+def client(tmp_path: Path):
+    app = _make_app(_make_settings(tmp_path, emulate_devices=True))
+    with TestClient(app) as test_client:
+        # Give the emulated 200 Hz IMU thread a moment to produce a snapshot
+        # so calibration endpoints have attitude data to work with.
+        time.sleep(0.1)
+        yield test_client
+
+
+@pytest.fixture()
+def client_without_sensors(tmp_path: Path):
+    app = _make_app(_make_settings(tmp_path, emulate_devices=False))
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_health_responds(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["service"] == "highend-control-server"
+    assert "system" in body
+
+
+def test_get_sensors_shape(client: TestClient) -> None:
+    response = client.get("/api/sensors")
+    assert response.status_code == 200
+    imu = response.json()["item"]["imu"]
+    assert "quaternion" in imu
+    assert "mag_calibration_active" in imu
+
+
+def test_get_stabilization_state_shape(client: TestClient) -> None:
+    response = client.get("/api/control/stabilization")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is False
+    assert set(body["gains"]) == {
+        "kp_roll", "ki_roll", "kd_roll", "kp_pitch", "ki_pitch", "kd_pitch",
+    }
+    assert len(body["corrections"]) == 8
+
+
+def test_post_stabilization_enable_disable_roundtrip(client: TestClient) -> None:
+    enabled = client.post("/api/control/stabilization", json={"enabled": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+
+    disabled = client.post("/api/control/stabilization", json={"enabled": False})
+    assert disabled.status_code == 200
+    body = disabled.json()
+    assert body["enabled"] is False
+    assert body["active"] is False
+
+
+def test_post_stabilization_rejects_invalid_gains(client: TestClient) -> None:
+    response = client.post(
+        "/api/control/stabilization",
+        json={"gains": {
+            "kp_roll": -1.0, "ki_roll": 0.0, "kd_roll": 0.0,
+            "kp_pitch": 1.0, "ki_pitch": 0.0, "kd_pitch": 0.0,
+        }},
+    )
+    assert response.status_code == 422
+
+
+def test_calibration_blocked_while_stabilization_enabled(client: TestClient) -> None:
+    assert client.post("/api/control/stabilization", json={"enabled": True}).status_code == 200
+
+    blocked = client.post("/api/sensors/imu/calibration/level")
+    assert blocked.status_code == 409
+
+    assert client.post("/api/control/stabilization", json={"enabled": False}).status_code == 200
+    # Wait out the disable ramp so the controller reports fully idle.
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        state = client.get("/api/control/stabilization").json()
+        if not state["enabled"] and not state["active"]:
+            break
+        time.sleep(0.05)
+
+    allowed = client.post("/api/sensors/imu/calibration/level")
+    assert allowed.status_code == 200
+
+
+def test_mag_calibration_start_bad_finish_and_cancel(client: TestClient) -> None:
+    start = client.post("/api/sensors/imu/calibration/mag/start")
+    assert start.status_code == 200
+    assert start.json()["item"]["imu"]["mag_calibration_active"] is True
+
+    # Immediately finishing cannot have collected enough samples -> 400.
+    finish = client.post("/api/sensors/imu/calibration/mag/finish")
+    assert finish.status_code == 400
+
+    restart = client.post("/api/sensors/imu/calibration/mag/start")
+    assert restart.status_code == 200
+    cancel = client.post("/api/sensors/imu/calibration/mag/cancel")
+    assert cancel.status_code == 200
+    assert cancel.json()["item"]["imu"]["mag_calibration_active"] is False
+
+
+def test_mag_calibration_conflict_when_sensors_disabled(
+    client_without_sensors: TestClient,
+) -> None:
+    start = client_without_sensors.post("/api/sensors/imu/calibration/mag/start")
+    assert start.status_code == 409
