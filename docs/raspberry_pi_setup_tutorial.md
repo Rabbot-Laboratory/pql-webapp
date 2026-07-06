@@ -130,6 +130,32 @@ curl http://127.0.0.1:8000/api/health
 http://<pi-ip>:8000/
 ```
 
+### 7.1 IMU センサ・スタビライゼーションを使う場合(任意)
+
+BMX055 IMU による姿勢表示・スタビライゼーション(胴体水平維持)機能を使う場合は、
+`HIGHEND_SENSORS_ENABLED=true` に加えて、必要に応じて以下の環境変数で調整します
+(すべて省略可、既定値のままで動作します)。
+
+```bash
+# IMU フュージョン(専用 100Hz スレッド)
+HIGHEND_IMU_SAMPLE_RATE_HZ=100          # 加速度+ジャイロ読み取りレート
+HIGHEND_IMU_MAG_SAMPLE_RATE_HZ=20       # 磁気センサ読み取りレート
+HIGHEND_MAHONY_KP=0.8
+HIGHEND_MAHONY_KI=0.02
+
+# 姿勢スタビライゼーション(デフォルトは常に無効、API から明示的に有効化するまで動かない)
+HIGHEND_STABILIZATION_RATE_HZ=25
+HIGHEND_STABILIZATION_MAX_CORRECTION=120
+HIGHEND_STABILIZATION_MAX_CORRECTION_RATE=400
+HIGHEND_STABILIZATION_MAX_TILT_DEG=30
+HIGHEND_STABILIZATION_MAX_STALENESS_SEC=0.2
+```
+
+較正手順(水平 → ジャイロゼロ → 磁気較正)、GUI 操作、REST API、そして
+**実機での軸符号確認チェックリスト(初回電源投入時に必須)** は
+`docs/imu_stabilization_guide.md` にまとめてあります。実機でスタビライゼーションを
+有効化する前に、必ずこのチェックリストを一読してください。
+
 ## 8. USB シリアルの確認
 
 ESP32 を 2 台挿したら、まず Linux からどう見えているか確認します。

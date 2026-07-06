@@ -165,6 +165,31 @@ Then open the browser dashboard:
 http://<raspberry-pi-host>:8000/
 ```
 
+### IMU attitude stabilization
+
+On top of the display-only IMU pipeline above, the server can optionally close
+a feedback loop that uses the fused Roll/Pitch to keep the body level, and to
+protect CSV motion playback against attitude drift. It is **disabled by
+default** and never auto-enables on boot.
+
+- Feedback control: Roll/Pitch error -> per-axis PID -> leg mixing matrix ->
+  per-actuator position corrections, added on top of the user/CSV base target.
+  Yaw is display-only and never used for control.
+- Safety mechanisms: correction clamp and rate limiter, auto-disable on
+  excessive tilt (>30 deg default), stale attitude (>0.2s default), repeated
+  serial send failures, or an internal loop error, with a smooth ramp-to-zero
+  on any disable (manual or automatic).
+- Control via `GET`/`POST /api/control/stabilization` or the "Sensors &
+  Control" tab in the Vue UI.
+- IMU calibration also includes a magnetometer (hard/soft-iron) flow:
+  `POST /api/sensors/imu/calibration/mag/start` / `mag/finish` / `mag/cancel`.
+  Most calibration endpoints (level, gyro-zero, reset, mag/start, mag/finish)
+  return `409` while stabilization is enabled/active — disable it first.
+
+See `docs/imu_stabilization_guide.md` (Japanese) for the full operator guide,
+including the on-robot axis-sign verification checklist that must be run once
+before trusting the corrections on real hardware.
+
 ## Vue UI scaffold
 
 The staged production UI now lives in `web-vue/`.
@@ -193,6 +218,11 @@ Main endpoints:
 - `POST /api/sensors/imu/calibration/level`
 - `POST /api/sensors/imu/calibration/gyro-zero`
 - `POST /api/sensors/imu/calibration/reset`
+- `POST /api/sensors/imu/calibration/mag/start`
+- `POST /api/sensors/imu/calibration/mag/finish`
+- `POST /api/sensors/imu/calibration/mag/cancel`
+- `GET /api/control/stabilization`
+- `POST /api/control/stabilization`
 - `GET /api/preview/legs`
 - `POST /api/actuators/{id}/target`
 - `POST /api/actuators/{id}/gain`
