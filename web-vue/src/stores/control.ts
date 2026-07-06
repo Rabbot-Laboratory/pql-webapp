@@ -4,15 +4,18 @@ import { defineStore } from 'pinia';
 import {
   calibrateImuGyroZero,
   calibrateImuLevel,
+  cancelMagCalibration as apiCancelMagCalibration,
   createWebSocket,
   deleteMotionFile,
   fetchActuators,
   fetchHealth,
   fetchLegPreviews,
   fetchSensors,
+  fetchStabilization,
   fetchTelemetryRecordingStatus,
   fetchMotionFile,
   fetchMotionLibrary,
+  finishMagCalibration as apiFinishMagCalibration,
   importLegacyCsv,
   latestTelemetryRecordingDownloadUrl,
   requestCapture,
@@ -22,11 +25,13 @@ import {
   saveMotionFile,
   sendGain,
   sendTarget,
+  startMagCalibration as apiStartMagCalibration,
   startTelemetryRecording,
   startCsvPlayback,
   startFixedMotion,
   stopTelemetryRecording,
   stopCsvPlayback,
+  updateStabilization,
 } from '@/services/controlApi';
 import type {
   ActuatorState,
@@ -35,11 +40,14 @@ import type {
   ImportedMotionDraft,
   LegId,
   LegPreview,
+  MagCalibrationQuality,
   PlaybackAdvanceMode,
   MotionCategory,
   MotionFileDetail,
   MotionLibrarySnapshot,
   SensorState,
+  StabilizationGains,
+  StabilizationState,
   SystemStatus,
   TelemetryEvent,
   TelemetryRecordingScope,
@@ -85,6 +93,7 @@ export const useControlStore = defineStore('control', () => {
   const socket = ref<WebSocket | null>(null);
   const motionLibrary = ref<MotionLibrarySnapshot>({ fixed: [], custom: [] });
   const sensors = ref<SensorState | null>(null);
+  const stabilization = ref<StabilizationState | null>(null);
   const telemetryRecording = ref<TelemetryRecordingStatus>({
     is_recording: false,
     current_log_name: null,
@@ -97,9 +106,18 @@ export const useControlStore = defineStore('control', () => {
 
   let reconnectTimer: number | null = null;
   let flushTimer: number | null = null;
+  // Stale-response guards: if a newer request for the same shared state fires before an
+  // older one's response lands (e.g. rapid toggle/apply clicks), only the response matching
+  // the latest request id is allowed to write the shared ref.
+  let stabilizationRequestId = 0;
+  let magCalibrationRequestId = 0;
   const pendingActuators = new Map<number, ActuatorState>();
   const pendingLegs = new Map<LegId, LegPreview>();
   let pendingSystem: SystemStatus | null = null;
+  // Latest-wins buffer for `sensor_state` (can arrive at up to sensor push rate). Flushed on
+  // the same UI_FLUSH_INTERVAL_MS cadence as actuator/leg updates instead of writing
+  // `sensors.value` directly, so IMU updates don't force a three.js re-render on every packet.
+  let pendingSensors: SensorState | null = null;
 
   const focusedLeg = computed(() => legs.value.find((item) => item.leg_id === focusedLegId.value) ?? null);
   const selectedActuator = computed(
@@ -177,6 +195,11 @@ export const useControlStore = defineStore('control', () => {
       pendingSystem = null;
     }
 
+    if (pendingSensors) {
+      sensors.value = pendingSensors;
+      pendingSensors = null;
+    }
+
     if (pendingActuators.size) {
       const nextList = [...actuators.value];
       for (const actuator of pendingActuators.values()) {
@@ -211,13 +234,20 @@ export const useControlStore = defineStore('control', () => {
   function handleWsMessage(event: TelemetryEvent): void {
     if (event.type === 'snapshot') {
       const payload = event.payload as {
-        system: SystemStatus;
-        actuators: ActuatorState[];
-        legs: LegPreview[];
+        system?: SystemStatus;
+        actuators?: ActuatorState[];
+        legs?: LegPreview[];
         sensors?: SensorState;
-      };
+        stabilization?: StabilizationState;
+      } | null;
+      // Defensive guard: a malformed/partial snapshot payload must not write `undefined`
+      // into these typed refs (components dereference them without further null checks).
+      if (!payload?.system || !payload.actuators || !payload.legs) {
+        return;
+      }
       system.value = payload.system;
       sensors.value = payload.sensors ?? null;
+      stabilization.value = payload.stabilization ?? null;
       telemetryRecording.value = {
         ...telemetryRecording.value,
         is_recording: payload.system.telemetry_recording,
@@ -230,6 +260,7 @@ export const useControlStore = defineStore('control', () => {
       resetActuatorHistories(payload.actuators);
       pendingActuators.clear();
       pendingLegs.clear();
+      pendingSensors = null;
       syncSelectedTargets();
       return;
     }
@@ -270,7 +301,22 @@ export const useControlStore = defineStore('control', () => {
     }
 
     if (event.type === 'sensor_state') {
-      sensors.value = (event.payload as { sensors: SensorState }).sensors;
+      const sensorPayload = (event.payload as { sensors?: SensorState } | null)?.sensors;
+      if (sensorPayload) {
+        pendingSensors = sensorPayload;
+        scheduleFlush();
+      }
+      return;
+    }
+
+    if (event.type === 'stabilization_state') {
+      // Server already throttles this to ~8Hz (plus transition events), and the
+      // stabilization panel doesn't drive any three.js work, so apply it directly
+      // instead of routing through the UI_FLUSH_INTERVAL_MS buffer.
+      const stabilizationPayload = (event.payload as { stabilization?: StabilizationState } | null)?.stabilization;
+      if (stabilizationPayload) {
+        stabilization.value = stabilizationPayload;
+      }
       return;
     }
 
@@ -291,20 +337,23 @@ export const useControlStore = defineStore('control', () => {
   async function refresh(): Promise<void> {
     loading.value = true;
     try {
-      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot] = await Promise.all([
-        fetchHealth(),
-        fetchActuators(),
-        fetchLegPreviews(),
-        fetchMotionLibrary(),
-        fetchTelemetryRecordingStatus(),
-        fetchSensors(),
-      ]);
+      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot, stabilizationSnapshot] =
+        await Promise.all([
+          fetchHealth(),
+          fetchActuators(),
+          fetchLegPreviews(),
+          fetchMotionLibrary(),
+          fetchTelemetryRecordingStatus(),
+          fetchSensors(),
+          fetchStabilization(),
+        ]);
       system.value = health.system;
       actuators.value = actuatorSnapshot.items;
       legs.value = legSnapshot.items;
       resetActuatorHistories(actuatorSnapshot.items);
       motionLibrary.value = librarySnapshot;
       sensors.value = sensorSnapshot.item;
+      stabilization.value = stabilizationSnapshot;
       telemetryRecording.value = recordingStatus;
       syncSelectedTargets();
     } finally {
@@ -523,6 +572,47 @@ export const useControlStore = defineStore('control', () => {
     sensors.value = response.item;
   }
 
+  async function startMagCalibration(): Promise<void> {
+    const requestId = ++magCalibrationRequestId;
+    const response = await apiStartMagCalibration();
+    if (requestId === magCalibrationRequestId) {
+      sensors.value = response.item;
+    }
+  }
+
+  async function finishMagCalibration(): Promise<MagCalibrationQuality> {
+    const requestId = ++magCalibrationRequestId;
+    const response = await apiFinishMagCalibration();
+    if (requestId === magCalibrationRequestId) {
+      sensors.value = response.item;
+    }
+    return response.quality;
+  }
+
+  async function cancelMagCalibration(): Promise<void> {
+    const requestId = ++magCalibrationRequestId;
+    const response = await apiCancelMagCalibration();
+    if (requestId === magCalibrationRequestId) {
+      sensors.value = response.item;
+    }
+  }
+
+  async function setStabilizationEnabled(enabled: boolean): Promise<void> {
+    const requestId = ++stabilizationRequestId;
+    const response = await updateStabilization({ enabled });
+    if (requestId === stabilizationRequestId) {
+      stabilization.value = response;
+    }
+  }
+
+  async function applyStabilizationGains(gains: StabilizationGains): Promise<void> {
+    const requestId = ++stabilizationRequestId;
+    const response = await updateStabilization({ gains });
+    if (requestId === stabilizationRequestId) {
+      stabilization.value = response;
+    }
+  }
+
   async function beginTelemetryRecording(scope: TelemetryRecordingScope, actuatorId?: number): Promise<void> {
     telemetryRecording.value = await startTelemetryRecording({
       scope,
@@ -560,9 +650,12 @@ export const useControlStore = defineStore('control', () => {
     activeTab,
     actuators,
     actuatorHistories,
+    applyStabilizationGains,
+    cancelMagCalibration,
     capture,
     connectedActuatorCount,
     dispose,
+    finishMagCalibration,
     focusedLeg,
     focusedLegId,
     importLegacyCsvDraft,
@@ -572,6 +665,9 @@ export const useControlStore = defineStore('control', () => {
     loadMotionFile,
     motionLibrary,
     sensors,
+    setStabilizationEnabled,
+    stabilization,
+    startMagCalibration,
     telemetryRecording,
     refresh,
     refreshTelemetryRecording,

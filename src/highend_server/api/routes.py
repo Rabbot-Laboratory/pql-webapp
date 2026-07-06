@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from highend_server.api.dependencies import get_control_service, get_sensor_service
+from highend_server.api.dependencies import (
+    get_control_service,
+    get_sensor_service,
+    get_stabilization_controller,
+)
 from highend_server.application.control_service import ControlService
+from highend_server.application.stabilization import StabilizationController
 from highend_server.domain.models import (
     CaptureRequest,
     ConnectionState,
@@ -16,11 +21,12 @@ from highend_server.domain.models import (
     SaveMotionRequest,
     SetGainRequest,
     SetTargetRequest,
+    StabilizationRequest,
+    StabilizationState,
     StartTelemetryRecordingRequest,
     TelemetryRecordingStatus,
 )
 from highend_server.sensors.sensor_service import SensorService
-
 
 router = APIRouter()
 
@@ -30,6 +36,17 @@ def _validate_actuator_id(service: ControlService, actuator_id: int) -> None:
     if 0 <= actuator_id < actuator_count:
         return
     raise HTTPException(status_code=404, detail=f"Actuator {actuator_id} was not found")
+
+
+def _ensure_stabilization_idle(controller: StabilizationController) -> None:
+    """Reject IMU calibration while stabilization is engaged.
+
+    Calibration snaps the fusion filter to identity, which would cause a PID
+    derivative kick on the real actuators. The user must disable stabilization
+    first (this is the only new 409 relative to the Phase 2 contract).
+    """
+    if controller.enabled or controller.active:
+        raise HTTPException(status_code=409, detail="stabilization active — disable first")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -53,8 +70,15 @@ async def get_sensors(service: SensorService = Depends(get_sensor_service)) -> d
 
 
 @router.post("/sensors/imu/calibration/level")
-async def calibrate_imu_level(service: SensorService = Depends(get_sensor_service)) -> dict:
-    state = await service.calibrate_level()
+async def calibrate_imu_level(
+    service: SensorService = Depends(get_sensor_service),
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> dict:
+    _ensure_stabilization_idle(controller)
+    try:
+        state = await service.calibrate_level()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return {"item": state.model_dump(mode="json")}
 
 
@@ -62,19 +86,85 @@ async def calibrate_imu_level(service: SensorService = Depends(get_sensor_servic
 async def calibrate_imu_gyro_zero(
     request: ImuCalibrationRequest | None = None,
     service: SensorService = Depends(get_sensor_service),
+    controller: StabilizationController = Depends(get_stabilization_controller),
 ) -> dict:
-    state = await service.calibrate_gyro_zero((request or ImuCalibrationRequest()).sample_count)
+    _ensure_stabilization_idle(controller)
+    try:
+        state = await service.calibrate_gyro_zero((request or ImuCalibrationRequest()).sample_count)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return {"item": state.model_dump(mode="json")}
 
 
 @router.post("/sensors/imu/calibration/reset")
-async def reset_imu_calibration(service: SensorService = Depends(get_sensor_service)) -> dict:
-    state = await service.reset_imu_calibration()
+async def reset_imu_calibration(
+    service: SensorService = Depends(get_sensor_service),
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> dict:
+    _ensure_stabilization_idle(controller)
+    try:
+        state = await service.reset_imu_calibration()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return {"item": state.model_dump(mode="json")}
 
 
+@router.post("/sensors/imu/calibration/mag/start")
+async def start_mag_calibration(
+    service: SensorService = Depends(get_sensor_service),
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> dict:
+    _ensure_stabilization_idle(controller)
+    try:
+        state = await service.start_mag_calibration()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"item": state.model_dump(mode="json")}
+
+
+@router.post("/sensors/imu/calibration/mag/finish")
+async def finish_mag_calibration(
+    service: SensorService = Depends(get_sensor_service),
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> dict:
+    _ensure_stabilization_idle(controller)
+    try:
+        state, quality = await service.finish_mag_calibration()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {
+        "item": state.model_dump(mode="json"),
+        "quality": quality.model_dump(mode="json"),
+    }
+
+
+@router.post("/sensors/imu/calibration/mag/cancel")
+async def cancel_mag_calibration(service: SensorService = Depends(get_sensor_service)) -> dict:
+    state = await service.cancel_mag_calibration()
+    return {"item": state.model_dump(mode="json")}
+
+
+@router.get("/control/stabilization", response_model=StabilizationState)
+async def get_stabilization(
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> StabilizationState:
+    return controller.get_state()
+
+
+@router.post("/control/stabilization", response_model=StabilizationState)
+async def set_stabilization(
+    request: StabilizationRequest,
+    controller: StabilizationController = Depends(get_stabilization_controller),
+) -> StabilizationState:
+    return await controller.apply_request(request)
+
+
 @router.get("/actuators/{actuator_id}")
-async def get_actuator(actuator_id: int, service: ControlService = Depends(get_control_service)) -> dict:
+async def get_actuator(
+    actuator_id: int, service: ControlService = Depends(get_control_service)
+) -> dict:
     _validate_actuator_id(service, actuator_id)
     return {"item": service.get_actuator(actuator_id).model_dump(mode="json")}
 
@@ -85,7 +175,9 @@ async def list_leg_previews(service: ControlService = Depends(get_control_servic
 
 
 @router.get("/preview/legs/{leg_id}")
-async def get_leg_preview(leg_id: LegId, service: ControlService = Depends(get_control_service)) -> dict:
+async def get_leg_preview(
+    leg_id: LegId, service: ControlService = Depends(get_control_service)
+) -> dict:
     return {"item": service.get_leg_preview(leg_id).model_dump(mode="json")}
 
 
@@ -112,14 +204,18 @@ async def set_gain(
 
 
 @router.post("/actuators/{actuator_id}/gain/request")
-async def request_gain(actuator_id: int, service: ControlService = Depends(get_control_service)) -> dict:
+async def request_gain(
+    actuator_id: int, service: ControlService = Depends(get_control_service)
+) -> dict:
     _validate_actuator_id(service, actuator_id)
     await service.request_gain(actuator_id)
     return {"ok": True}
 
 
 @router.post("/actuators/{actuator_id}/gain/save")
-async def request_gain_save(actuator_id: int, service: ControlService = Depends(get_control_service)) -> dict:
+async def request_gain_save(
+    actuator_id: int, service: ControlService = Depends(get_control_service)
+) -> dict:
     _validate_actuator_id(service, actuator_id)
     await service.request_gain_save(actuator_id)
     return {"ok": True}
@@ -267,9 +363,18 @@ async def websocket_stream(websocket: WebSocket) -> None:
                 "timestamp": service.system_status.updated_at.isoformat(),
                 "payload": {
                     "system": service.system_status.model_dump(mode="json"),
-                    "actuators": [item.model_dump(mode="json") for item in service.list_actuators()],
-                    "legs": [item.model_dump(mode="json") for item in service.list_leg_previews()],
+                    "actuators": [
+                        item.model_dump(mode="json") for item in service.list_actuators()
+                    ],
+                    "legs": [
+                        item.model_dump(mode="json") for item in service.list_leg_previews()
+                    ],
                     "sensors": websocket.app.state.sensor_service.state.model_dump(mode="json"),
+                    "stabilization": (
+                        websocket.app.state.stabilization_controller.get_state().model_dump(
+                            mode="json"
+                        )
+                    ),
                 },
             }
         )

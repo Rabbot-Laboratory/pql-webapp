@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from math import radians
 from dataclasses import dataclass
+from math import radians
 
 from highend_server.domain.models import (
+    POSITION_MAX,
+    POSITION_MIN,
     ActuatorState,
     JointPreview,
     LegId,
     LegPreview,
-    POSITION_MAX,
-    POSITION_MIN,
 )
 
 # 3D preview tuning knobs.

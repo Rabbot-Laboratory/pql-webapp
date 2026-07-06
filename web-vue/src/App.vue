@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
+import ConfirmDialog from 'primevue/confirmdialog';
 import Drawer from 'primevue/drawer';
 import Tab from 'primevue/tab';
 import TabList from 'primevue/tablist';
@@ -16,9 +17,17 @@ import FocusedLegView from '@/components/FocusedLegView.vue';
 import MotionControlPanel from '@/components/MotionControlPanel.vue';
 import PressureMonitorPanel from '@/components/PressureMonitorPanel.vue';
 import SensorCalibrationPanel from '@/components/SensorCalibrationPanel.vue';
+import StabilizationPanel from '@/components/StabilizationPanel.vue';
 import StatusToolbar from '@/components/StatusToolbar.vue';
 import { useControlStore } from '@/stores/control';
-import type { ActuatorState, ControlMode, FixedMotion, MotionCategory } from '@/types/control';
+import type {
+  ActuatorState,
+  ControlMode,
+  FixedMotion,
+  MagCalibrationQuality,
+  MotionCategory,
+  StabilizationGains,
+} from '@/types/control';
 import { actuatorLabel } from '@/utils/i18n';
 
 const store = useControlStore();
@@ -26,6 +35,11 @@ const toast = useToast();
 const navOpen = ref(false);
 const isMobile = ref(false);
 const sensorCalibrationBusy = ref(false);
+const stabilizationToggleBusy = ref(false);
+const stabilizationGainsBusy = ref(false);
+const stabilizationGainsError = ref(false);
+const magCalibrationBusy = ref(false);
+const magCalibrationQuality = ref<MagCalibrationQuality | null>(null);
 
 const tabOptions = computed(() =>
   isMobile.value
@@ -34,14 +48,14 @@ const tabOptions = computed(() =>
         { value: 'legs', label: '脚' },
         { value: 'motion', label: '動作' },
         { value: 'pressure', label: '圧力' },
-        { value: 'sensors', label: 'Sensor' },
+        { value: 'sensors', label: 'センサ・制御' },
       ]
     : [
         { value: 'dashboard', label: 'Dashboard' },
         { value: 'legs', label: 'Kinematics' },
         { value: 'motion', label: 'Motion' },
         { value: 'pressure', label: 'Pressure' },
-        { value: 'sensors', label: 'Sensor Calib' },
+        { value: 'sensors', label: 'Sensors & Control' },
       ],
 );
 
@@ -269,6 +283,119 @@ async function handleResetImuCalibration(): Promise<void> {
   }
 }
 
+async function handleStartMagCalibration(): Promise<void> {
+  magCalibrationBusy.value = true;
+  magCalibrationQuality.value = null;
+  try {
+    await store.startMagCalibration();
+    toast.add({
+      severity: 'info',
+      summary: '磁気較正を開始しました',
+      detail: 'ロボットを全方向にゆっくり回転させてください。',
+      life: 3000,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '磁気較正の開始に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    magCalibrationBusy.value = false;
+  }
+}
+
+async function handleFinishMagCalibration(): Promise<void> {
+  magCalibrationBusy.value = true;
+  try {
+    const quality = await store.finishMagCalibration();
+    magCalibrationQuality.value = quality;
+    toast.add({
+      severity: 'success',
+      summary: '磁気較正を保存しました',
+      detail: `サンプル数 ${quality.sample_count} / 残差 ${quality.residual.toFixed(3)} / カバレッジ ${(quality.coverage * 100).toFixed(0)}%`,
+      life: 4000,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '磁気較正に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。回転範囲を広げて再試行してください。',
+      life: 4000,
+    });
+  } finally {
+    magCalibrationBusy.value = false;
+  }
+}
+
+async function handleCancelMagCalibration(): Promise<void> {
+  magCalibrationBusy.value = true;
+  try {
+    await store.cancelMagCalibration();
+    toast.add({
+      severity: 'info',
+      summary: '磁気較正をキャンセルしました',
+      life: 2000,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'キャンセルに失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    magCalibrationBusy.value = false;
+  }
+}
+
+async function handleToggleStabilization(enabled: boolean): Promise<void> {
+  stabilizationToggleBusy.value = true;
+  try {
+    await store.setStabilizationEnabled(enabled);
+    toast.add({
+      severity: enabled ? 'warn' : 'success',
+      summary: enabled ? 'スタビライゼーションを有効化しました' : 'スタビライゼーションを無効化しました',
+      life: 2200,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'スタビライゼーション設定に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    stabilizationToggleBusy.value = false;
+  }
+}
+
+async function handleApplyStabilizationGains(gains: StabilizationGains): Promise<void> {
+  stabilizationGainsBusy.value = true;
+  stabilizationGainsError.value = false;
+  try {
+    await store.applyStabilizationGains(gains);
+    toast.add({
+      severity: 'success',
+      summary: 'ゲインを適用しました',
+      life: 2000,
+    });
+  } catch (error) {
+    // Signals StabilizationPanel to keep the operator's edited (unsaved)
+    // values instead of resyncing the form from the pre-edit server state.
+    stabilizationGainsError.value = true;
+    toast.add({
+      severity: 'error',
+      summary: 'ゲイン適用に失敗しました',
+      detail: error instanceof Error ? error.message : '不明なエラーです。',
+      life: 3200,
+    });
+  } finally {
+    stabilizationGainsBusy.value = false;
+  }
+}
+
 async function handleLibraryMotion(category: MotionCategory, name: string): Promise<void> {
   try {
     const detail = await store.loadMotionFile(category, name);
@@ -344,6 +471,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Toast position="top-right" />
+  <ConfirmDialog />
 
   <div class="console-shell" :class="{ 'is-mobile-shell': isMobile }">
     <StatusToolbar
@@ -449,9 +577,22 @@ onBeforeUnmount(() => {
               <SensorCalibrationPanel
                 :sensors="store.sensors"
                 :busy="sensorCalibrationBusy"
+                :mag-calibration-busy="magCalibrationBusy"
+                :mag-calibration-quality="magCalibrationQuality"
                 @calibrate-level="handleCalibrateImuLevel"
                 @calibrate-gyro="handleCalibrateImuGyro"
                 @reset-calibration="handleResetImuCalibration"
+                @start-mag-calibration="handleStartMagCalibration"
+                @finish-mag-calibration="handleFinishMagCalibration"
+                @cancel-mag-calibration="handleCancelMagCalibration"
+              />
+              <StabilizationPanel
+                :stabilization="store.stabilization"
+                :toggle-busy="stabilizationToggleBusy"
+                :gains-busy="stabilizationGainsBusy"
+                :gains-error="stabilizationGainsError"
+                @toggle-enabled="handleToggleStabilization"
+                @apply-gains="handleApplyStabilizationGains"
               />
             </section>
           </TabPanel>

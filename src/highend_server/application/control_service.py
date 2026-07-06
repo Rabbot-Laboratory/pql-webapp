@@ -6,8 +6,9 @@ import io
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import TextIO
 from zoneinfo import ZoneInfo
 
@@ -18,21 +19,23 @@ from highend_server.application.joint_preview import (
 )
 from highend_server.config import Settings
 from highend_server.domain.models import (
+    POSITION_MAX,
+    POSITION_MIN,
     ActuatorState,
-    PlaybackAdvanceMode,
     CaptureRequest,
     ControlMode,
     CsvPlaybackRequest,
     DeviceEnvelope,
     FixedMotionRequest,
-    ImportLegacyCsvRequest,
     ImportedMotionDraft,
+    ImportLegacyCsvRequest,
     LegId,
     LegPreview,
     MotionCategory,
     MotionFileDetail,
     MotionLibraryItem,
     MotionLibrarySnapshot,
+    PlaybackAdvanceMode,
     PlaybackStatus,
     PortRole,
     SaveMotionRequest,
@@ -56,20 +59,42 @@ from highend_server.protocol.frames import (
     decode_frame,
     decode_transport_payload,
 )
+from highend_server.sensors.sensor_service import AttitudeState
 from highend_server.transport.serial_gateway import SerialGateway
 
-
 EventSink = Callable[[TelemetryEvent], Awaitable[None]]
+# Phase 3: optional attitude access for the CSV playback row-advance guard.
+# Mirrors the provider shape `StabilizationController` already uses.
+AttitudeProvider = Callable[[], AttitudeState | None]
+LevelOffsetsProvider = Callable[[], tuple[float, float]]
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
 
 
 class ControlService:
-    def __init__(self, settings: Settings, gateway: SerialGateway, event_sink: EventSink) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        gateway: SerialGateway,
+        event_sink: EventSink,
+        *,
+        attitude_provider: AttitudeProvider | None = None,
+        level_offsets_provider: LevelOffsetsProvider | None = None,
+        time_fn: Callable[[], float] = monotonic,
+    ) -> None:
         self.settings = settings
         self.gateway = gateway
         self.event_sink = event_sink
         self.gateway.set_device_callback(self.handle_device_payload)
+
+        # Phase 3: optional attitude source for the CSV playback row-advance
+        # guard (`_attitude_guard_state`). `main.py` constructs `ControlService`
+        # before `SensorService` exists, so these are also settable later via
+        # `set_attitude_provider`/`set_level_offsets_provider`. Left unwired,
+        # the guard silently no-ops regardless of `playback_attitude_guard_deg`.
+        self._attitude_provider = attitude_provider
+        self._level_offsets_provider = level_offsets_provider or (lambda: (0.0, 0.0))
+        self._time_fn = time_fn
 
         self._lock = asyncio.Lock()
         self._csv_task: asyncio.Task[None] | None = None
@@ -78,6 +103,22 @@ class ControlService:
         self._current_motion_category: MotionCategory | None = None
         self._current_motion_loop = False
         self._actuators = self._build_initial_actuators(settings.actuator_count)
+        # Phase 2 stabilization composition layer. Corrections are position-target
+        # offsets added on top of the user/CSV *base* targets at frame-send time.
+        # Default all-zero => effective == base => byte-identical to prior behaviour.
+        self._corrections: list[float] = [0.0] * settings.actuator_count
+        # Last control mode driven per port. Corrections only re-send a port that
+        # is in POSITION mode (never clobber a manually command-mode-driven port).
+        self._last_mode: dict[PortRole, ControlMode] = {
+            PortRole.FRONT: ControlMode.POSITION,
+            PortRole.BACK: ControlMode.POSITION,
+        }
+        # Effective position fields last sent per port, for the correction deadband.
+        # Seeded to the initial base so a zero-correction tick is a no-op.
+        self._last_sent_position: dict[PortRole, list[int]] = {
+            PortRole.FRONT: self._base_position_fields(PortRole.FRONT),
+            PortRole.BACK: self._base_position_fields(PortRole.BACK),
+        }
         self._telemetry_log_handle: TextIO | None = None
         self._telemetry_log_writer: csv.writer | None = None
         self._telemetry_log_started_at: datetime | None = None
@@ -107,8 +148,16 @@ class ControlService:
     def telemetry_recording_status(self) -> TelemetryRecordingStatus:
         return TelemetryRecordingStatus(
             is_recording=self._telemetry_log_handle is not None,
-            current_log_name=self._telemetry_log_current_path.name if self._telemetry_log_current_path else None,
-            latest_log_name=self._telemetry_log_latest_path.name if self._telemetry_log_latest_path else None,
+            current_log_name=(
+                self._telemetry_log_current_path.name
+                if self._telemetry_log_current_path
+                else None
+            ),
+            latest_log_name=(
+                self._telemetry_log_latest_path.name
+                if self._telemetry_log_latest_path
+                else None
+            ),
             started_at=self._telemetry_log_started_at,
             sample_count=self._telemetry_sample_count,
             scope=self._telemetry_recording_scope,
@@ -166,7 +215,9 @@ class ControlService:
             source_format=source_format,
         )
 
-    def save_motion_file(self, category: MotionCategory, request: SaveMotionRequest) -> MotionFileDetail:
+    def save_motion_file(
+        self, category: MotionCategory, request: SaveMotionRequest
+    ) -> MotionFileDetail:
         safe_name = self._sanitize_motion_name(request.name)
         path = self._category_path(category) / f"{safe_name}.csv"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,7 +262,7 @@ class ControlService:
 
         request = request or StartTelemetryRecordingRequest()
         self.settings.telemetry_log_path.mkdir(parents=True, exist_ok=True)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         suffix = (
             f"actuator_{request.actuator_id}"
             if request.scope is TelemetryRecordingScope.SELECTED and request.actuator_id is not None
@@ -263,20 +314,36 @@ class ControlService:
     def latest_telemetry_log_path(self) -> Path | None:
         return self._telemetry_log_latest_path
 
+    def set_attitude_provider(self, provider: AttitudeProvider | None) -> None:
+        """Late-bind the attitude source for the playback attitude guard.
+
+        Exists because the app composition root builds `ControlService` before
+        `SensorService` (see `main.py`); call this once both exist. Passing
+        `None` disables the guard again regardless of `playback_attitude_guard_deg`.
+        """
+        self._attitude_provider = provider
+
+    def set_level_offsets_provider(self, provider: LevelOffsetsProvider | None) -> None:
+        self._level_offsets_provider = provider or (lambda: (0.0, 0.0))
+
     async def set_target(self, actuator_id: int, request: SetTargetRequest) -> ActuatorState:
         actuator = self._actuators[actuator_id]
-        fields = self._current_fields_for_port(actuator.port_role, request.mode)
-        fields[actuator.local_index] = request.value
-
-        frame = build_set_target_frame(fields, request.mode)
-        await self.gateway.send_frame(actuator.port_role, frame)
 
         async with self._lock:
             state = self._actuators[actuator_id]
+            # Update the BASE target only; stabilization corrections are composed
+            # in at send time via `_effective_position_fields`.
             if request.mode is ControlMode.POSITION:
-                state.target_position = request.value
+                self._commit_base_position_locked(state, request.value)
+                fields = self._effective_position_fields(actuator.port_role)
+                self._last_sent_position[actuator.port_role] = list(fields)
             else:
                 state.target_command = request.value
+                self._last_mode[actuator.port_role] = request.mode
+                fields = self._current_fields_for_port(actuator.port_role, ControlMode.COMMAND)
+
+        frame = build_set_target_frame(fields, request.mode)
+        await self.gateway.send_frame(actuator.port_role, frame)
 
         await self._emit(
             "actuator_state",
@@ -319,7 +386,7 @@ class ControlService:
             state.gains.p = int(request.p)
             state.gains.i = int(request.i)
             state.gains.d = int(request.d)
-            state.updated_at = datetime.now(timezone.utc)
+            state.updated_at = datetime.now(UTC)
 
         await self._emit(
             "actuator_state",
@@ -361,6 +428,7 @@ class ControlService:
         try:
             raw_frame = decode_transport_payload(envelope.payload)
         except Exception:
+            logger.debug("Failed to decode transport payload", exc_info=True)
             return
         decoded = decode_frame(raw_frame)
         if decoded is None:
@@ -374,7 +442,7 @@ class ControlService:
                 actuator.telemetry.voltage = decoded.voltage
                 actuator.telemetry.command = decoded.command
                 actuator.telemetry.pressure = decoded.pressure
-                actuator.updated_at = datetime.now(timezone.utc)
+                actuator.updated_at = datetime.now(UTC)
                 self._append_telemetry_log_row(actuator)
             await self._emit(
                 "telemetry",
@@ -392,7 +460,7 @@ class ControlService:
                 actuator.gains.d = decoded.d_gain
                 actuator.capture.max = decoded.capture_max
                 actuator.capture.min = decoded.capture_min
-                actuator.updated_at = datetime.now(timezone.utc)
+                actuator.updated_at = datetime.now(UTC)
             await self._emit(
                 "gain_response",
                 {"actuator": self._actuators[global_index].model_dump(mode="json")},
@@ -420,18 +488,29 @@ class ControlService:
             await self._publish_server_status()
 
     async def _apply_csv_row(self, row: list[str]) -> None:
-        per_port_fields = {
-            PortRole.FRONT: self._current_fields_for_port(PortRole.FRONT, ControlMode.POSITION),
-            PortRole.BACK: self._current_fields_for_port(PortRole.BACK, ControlMode.POSITION),
-        }
+        """Send one CSV playback row as BASE position targets.
 
-        for global_index, value in enumerate(row[: self.settings.actuator_count]):
-            if str(value).strip() == "":
-                continue
-            actuator = self._actuators[global_index]
-            target_value = int(value)
-            per_port_fields[actuator.port_role][actuator.local_index] = target_value
-            actuator.target_position = target_value
+        Targets are committed through `_commit_base_position_locked` -- the same
+        storage `set_target` writes to -- so any active stabilization correction
+        composes in automatically via `_effective_position_fields` before the
+        frame is built. With stabilization disabled (all corrections == 0.0)
+        the sent frames are byte-identical to the pre-Phase-3 base-only frames.
+        """
+        per_port_fields: dict[PortRole, list[int]] = {}
+        async with self._lock:
+            for global_index, value in enumerate(row[: self.settings.actuator_count]):
+                if str(value).strip() == "":
+                    continue
+                self._commit_base_position_locked(self._actuators[global_index], int(value))
+
+            # A frame is always sent for both ports (matching prior behaviour),
+            # so both are marked POSITION-driven even if this particular row
+            # left one of them untouched.
+            for port_role in (PortRole.FRONT, PortRole.BACK):
+                self._last_mode[port_role] = ControlMode.POSITION
+                fields = self._effective_position_fields(port_role)
+                per_port_fields[port_role] = fields
+                self._last_sent_position[port_role] = list(fields)
 
         for port_role, fields in per_port_fields.items():
             frame = build_set_target_frame(fields, ControlMode.POSITION)
@@ -463,6 +542,7 @@ class ControlService:
 
             elapsed = asyncio.get_running_loop().time() - start_time
             if elapsed >= request.step_timeout_sec:
+                attitude_ok, roll_deg, pitch_deg = self._attitude_guard_state(request)
                 await self._emit(
                     "playback_guard",
                     {
@@ -470,21 +550,68 @@ class ControlService:
                         "targets": [index for index, _ in active_targets],
                         "position_tolerance": request.position_tolerance,
                         "pressure_threshold": request.pressure_threshold,
+                        "attitude_hold": not attitude_ok,
+                        "roll_deg": roll_deg,
+                        "pitch_deg": pitch_deg,
                     },
                 )
                 return
 
             await asyncio.sleep(max(0.02, min(request.interval_sec, 0.05)))
 
-    def _row_ready(self, active_targets: list[tuple[int, int]], request: CsvPlaybackRequest) -> bool:
+    def _row_ready(
+        self, active_targets: list[tuple[int, int]], request: CsvPlaybackRequest
+    ) -> bool:
         for actuator_index, target in active_targets:
             actuator = self._actuators[actuator_index]
             position_error = abs(actuator.telemetry.position - target)
             if position_error > request.position_tolerance:
                 return False
-            if request.pressure_threshold > 0 and actuator.telemetry.pressure < request.pressure_threshold:
+            if (
+                request.pressure_threshold > 0
+                and actuator.telemetry.pressure < request.pressure_threshold
+            ):
                 return False
-        return True
+        attitude_ok, _roll_deg, _pitch_deg = self._attitude_guard_state(request)
+        return attitude_ok
+
+    def _attitude_guard_threshold_deg(self, request: CsvPlaybackRequest) -> float | None:
+        if request.attitude_guard_deg is not None:
+            return request.attitude_guard_deg
+        return self.settings.playback_attitude_guard_deg
+
+    def _attitude_guard_state(
+        self, request: CsvPlaybackRequest
+    ) -> tuple[bool, float | None, float | None]:
+        """Optional attitude condition ANDed into `_row_ready` (Phase 3).
+
+        Returns ``(ok, roll_deg, pitch_deg)``. ``ok`` is True whenever the guard
+        is disabled (no threshold configured -- neither per-request nor via
+        `Settings.playback_attitude_guard_deg` -- or no attitude provider is
+        wired up) or the level-corrected tilt is within the threshold. It is
+        False while the tilt exceeds the threshold, and also while the attitude
+        snapshot is missing or stale: the caller's own `step_timeout_sec` bound
+        (identical to the pre-existing position/pressure guards) is what
+        prevents an indefinite hold in that case, so a dead/disconnected IMU
+        can never hang playback forever.
+        """
+        threshold = self._attitude_guard_threshold_deg(request)
+        if threshold is None or threshold <= 0.0 or self._attitude_provider is None:
+            return True, None, None
+
+        snapshot = self._attitude_provider()
+        if snapshot is None:
+            return False, None, None
+        # Reuse the stabilization staleness bound: same underlying question
+        # ("is this attitude snapshot still trustworthy?"), single tunable.
+        if self._time_fn() - snapshot.timestamp > self.settings.stabilization_max_staleness_sec:
+            return False, None, None
+
+        offset_roll, offset_pitch = self._level_offsets_provider()
+        roll = snapshot.euler.roll_deg - offset_roll
+        pitch = snapshot.euler.pitch_deg - offset_pitch
+        ok = abs(roll) <= threshold and abs(pitch) <= threshold
+        return ok, roll, pitch
 
     def _build_initial_actuators(self, actuator_count: int) -> list[ActuatorState]:
         labels = [
@@ -499,7 +626,11 @@ class ControlService:
         ]
         actuators: list[ActuatorState] = []
         for actuator_id in range(actuator_count):
-            port_role = PortRole.FRONT if actuator_id < NUM_ESP32_CONTROLLED_ACTUATORS else PortRole.BACK
+            port_role = (
+                PortRole.FRONT
+                if actuator_id < NUM_ESP32_CONTROLLED_ACTUATORS
+                else PortRole.BACK
+            )
             local_index = actuator_id % NUM_ESP32_CONTROLLED_ACTUATORS
             label = labels[actuator_id] if actuator_id < len(labels) else f"actuator-{actuator_id}"
             actuators.append(
@@ -535,7 +666,9 @@ class ControlService:
         ):
             return
 
-        elapsed_ms = int((actuator.updated_at - self._telemetry_log_started_at).total_seconds() * 1000)
+        elapsed_ms = int(
+            (actuator.updated_at - self._telemetry_log_started_at).total_seconds() * 1000
+        )
         self._telemetry_log_writer.writerow(
             [
                 self._format_jst_timestamp(actuator.updated_at),
@@ -582,7 +715,9 @@ class ControlService:
             raise ValueError(f"Motion '{name}' was not found")
         return path
 
-    def _read_motion_file(self, path: Path, category: MotionCategory) -> tuple[MotionLibraryItem, list[list[str]]]:
+    def _read_motion_file(
+        self, path: Path, category: MotionCategory
+    ) -> tuple[MotionLibraryItem, list[list[str]]]:
         with path.open("r", encoding="utf-8", newline="") as handle:
             (
                 rows,
@@ -612,7 +747,7 @@ class ControlService:
             pressure_threshold=pressure_threshold,
             step_timeout_sec=step_timeout_sec,
             settle_time_sec=settle_time_sec,
-            updated_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
+            updated_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
         )
         return item, rows
 
@@ -651,9 +786,16 @@ class ControlService:
             raise ValueError("CSV file is empty")
 
         if any(line.startswith("#") for line in non_empty_lines):
-            rows, interval_sec, loop, advance_mode, position_tolerance, pressure_threshold, step_timeout_sec, settle_time_sec = (
-                self._parse_motion_text(text)
-            )
+            (
+                rows,
+                interval_sec,
+                loop,
+                advance_mode,
+                position_tolerance,
+                pressure_threshold,
+                step_timeout_sec,
+                settle_time_sec,
+            ) = self._parse_motion_text(text)
             return (
                 rows,
                 interval_sec,
@@ -756,6 +898,67 @@ class ControlService:
             raise ValueError("Motion name is empty")
         return sanitized
 
+    async def apply_stabilization_corrections(self, corrections: list[float]) -> None:
+        """Apply per-actuator position-target corrections from the stabilizer.
+
+        Composes ``effective = clamp(base + correction)`` and re-sends only the
+        ports whose effective targets moved past the deadband, and only while the
+        port is in POSITION mode (a command-mode port is skipped, never clobbered).
+        Called at the stabilization loop rate (~25 Hz); serial writes are bounded
+        to at most one frame per port per tick.
+        """
+        deadband = self.settings.stabilization_correction_deadband
+        ports_to_send: dict[PortRole, list[int]] = {}
+        async with self._lock:
+            for index in range(min(len(corrections), len(self._corrections))):
+                self._corrections[index] = float(corrections[index])
+
+            for port_role in (PortRole.FRONT, PortRole.BACK):
+                if self._last_mode[port_role] is not ControlMode.POSITION:
+                    continue
+                fields = self._effective_position_fields(port_role)
+                last = self._last_sent_position[port_role]
+                if self._max_abs_diff(fields, last) >= deadband:
+                    ports_to_send[port_role] = fields
+
+        # Send outside the lock. Only record a port as "sent" after the write
+        # actually succeeds so a failed send is retried on the next tick (and the
+        # stabilizer's consecutive-failure auto-disable can fire).
+        for port_role, fields in ports_to_send.items():
+            frame = build_set_target_frame(fields, ControlMode.POSITION)
+            await self.gateway.send_frame(port_role, frame)
+            async with self._lock:
+                self._last_sent_position[port_role] = list(fields)
+
+    def _commit_base_position_locked(self, actuator: ActuatorState, value: int) -> None:
+        """Set a single actuator's BASE position target. Caller must hold `_lock`.
+
+        Shared by `set_target` (single actuator) and `_apply_csv_row` (batch)
+        so both paths funnel into the same base-target storage; stabilization
+        corrections are composed on top at send time via
+        `_effective_position_fields`.
+        """
+        actuator.target_position = value
+        self._last_mode[actuator.port_role] = ControlMode.POSITION
+
+    def _base_position_fields(self, port_role: PortRole) -> list[int]:
+        start = 0 if port_role is PortRole.FRONT else NUM_ESP32_CONTROLLED_ACTUATORS
+        end = start + NUM_ESP32_CONTROLLED_ACTUATORS
+        return [actuator.target_position for actuator in self._actuators[start:end]]
+
+    def _effective_position_fields(self, port_role: PortRole) -> list[int]:
+        start = 0 if port_role is PortRole.FRONT else NUM_ESP32_CONTROLLED_ACTUATORS
+        end = start + NUM_ESP32_CONTROLLED_ACTUATORS
+        fields: list[int] = []
+        for offset, actuator in enumerate(self._actuators[start:end]):
+            effective = actuator.target_position + int(round(self._corrections[start + offset]))
+            fields.append(max(POSITION_MIN, min(POSITION_MAX, effective)))
+        return fields
+
+    @staticmethod
+    def _max_abs_diff(a: list[int], b: list[int]) -> int:
+        return max((abs(x - y) for x, y in zip(a, b, strict=True)), default=0)
+
     def _current_fields_for_port(self, port_role: PortRole, mode: ControlMode) -> list[int]:
         start = 0 if port_role is PortRole.FRONT else NUM_ESP32_CONTROLLED_ACTUATORS
         end = start + NUM_ESP32_CONTROLLED_ACTUATORS
@@ -772,11 +975,13 @@ class ControlService:
             return local_index
         return local_index + NUM_ESP32_CONTROLLED_ACTUATORS
 
-    async def _emit(self, event_type: str, payload: dict) -> None:
+    async def _emit(self, event_type: str, payload: dict[str, object]) -> None:
         await self.event_sink(TelemetryEvent(type=event_type, payload=payload))
 
     async def _emit_leg_preview_for_actuator(self, actuator_id: int) -> None:
         leg_id = leg_id_for_actuator(actuator_id)
         if leg_id is None:
             return
-        await self._emit("leg_preview", {"leg": self.get_leg_preview(leg_id).model_dump(mode="json")})
+        await self._emit(
+            "leg_preview", {"leg": self.get_leg_preview(leg_id).model_dump(mode="json")}
+        )

@@ -4,10 +4,13 @@ import type {
   HealthResponse,
   ImportedMotionDraft,
   LegPreview,
+  MagCalibrationQuality,
   MotionCategory,
   MotionFileDetail,
   MotionLibrarySnapshot,
   SensorState,
+  StabilizationGains,
+  StabilizationState,
   TelemetryRecordingScope,
   TelemetryRecordingStatus,
   TelemetryEvent,
@@ -16,7 +19,16 @@ import type {
 async function readJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    let detail: string | undefined;
+    try {
+      const body = (await response.clone().json()) as { detail?: unknown };
+      if (typeof body?.detail === 'string') {
+        detail = body.detail;
+      }
+    } catch {
+      // Response body was not JSON (or already consumed); fall back to a status-only message.
+    }
+    throw new Error(detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
@@ -50,6 +62,40 @@ export async function calibrateImuGyroZero(sampleCount = 60): Promise<{ item: Se
 export async function resetImuCalibration(): Promise<{ item: SensorState }> {
   return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/reset', {
     method: 'POST',
+  });
+}
+
+export async function startMagCalibration(): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/mag/start', {
+    method: 'POST',
+  });
+}
+
+export async function finishMagCalibration(): Promise<{ item: SensorState; quality: MagCalibrationQuality }> {
+  return readJson<{ item: SensorState; quality: MagCalibrationQuality }>(
+    '/api/sensors/imu/calibration/mag/finish',
+    { method: 'POST' },
+  );
+}
+
+export async function cancelMagCalibration(): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/mag/cancel', {
+    method: 'POST',
+  });
+}
+
+export async function fetchStabilization(): Promise<StabilizationState> {
+  return readJson<StabilizationState>('/api/control/stabilization');
+}
+
+export async function updateStabilization(payload: {
+  enabled?: boolean;
+  gains?: StabilizationGains;
+}): Promise<StabilizationState> {
+  return readJson<StabilizationState>('/api/control/stabilization', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }
 
@@ -213,7 +259,13 @@ export function createWebSocket(
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
   socket.addEventListener('message', (event) => {
-    const data = JSON.parse(event.data) as TelemetryEvent;
+    let data: TelemetryEvent;
+    try {
+      data = JSON.parse(event.data) as TelemetryEvent;
+    } catch (error) {
+      console.warn('[ws] failed to parse message', error);
+      return;
+    }
     onMessage(data);
   });
   socket.addEventListener('close', onClose);

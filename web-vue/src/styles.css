@@ -1330,6 +1330,174 @@ textarea {
   gap: 0.65rem;
 }
 
+.mag-calibration-progress {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mag-calibration-instruction {
+  margin: 0;
+  color: #c8d1da;
+  font-size: 0.88rem;
+}
+
+.mag-calibration-samples {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.mag-calibration-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.mag-calibration-buttons .p-button {
+  flex: 1;
+  justify-content: center;
+}
+
+.mag-quality-result {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 16px;
+  background: rgba(11, 12, 16, 0.45);
+}
+
+.mag-quality-result span {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.mag-quality-result strong {
+  color: #f8fafc;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.85rem;
+}
+
+.stabilization-card,
+.stabilization-card .p-card-body,
+.stabilization-card .p-card-content {
+  height: 100%;
+}
+
+.stabilization-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
+  grid-template-rows: auto auto;
+  gap: 1rem;
+}
+
+.stabilization-status,
+.stabilization-gains,
+.stabilization-corrections {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+}
+
+.stabilization-status {
+  grid-row: span 2;
+}
+
+.stabilization-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.stabilization-header h3,
+.stabilization-gains h3,
+.stabilization-corrections h3 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.stabilization-header p,
+.stabilization-gains p {
+  margin: 0.25rem 0 0;
+  color: #94a3b8;
+}
+
+.stabilization-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #f8fafc;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.stabilization-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.stabilization-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.stabilization-metrics article {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 16px;
+  background: rgba(11, 12, 16, 0.55);
+}
+
+.stabilization-metrics span {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.stabilization-metrics strong {
+  color: #f8fafc;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.95rem;
+}
+
+.gains-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.gains-grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gains-grid span {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.gains-grid .p-inputnumber {
+  width: 100%;
+}
+
+.stabilization-gains .p-button {
+  justify-content: center;
+}
+
+.corrections-table .is-nonzero {
+  color: #facc15;
+  font-weight: 700;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
 @media (max-width: 1100px) {
   .cockpit-main-grid {
     grid-template-columns: 1fr;
@@ -1357,6 +1525,18 @@ textarea {
 
   .sensor-calibration-status {
     grid-row: auto;
+  }
+
+  .stabilization-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .stabilization-status {
+    grid-row: auto;
+  }
+
+  .gains-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1513,6 +1693,25 @@ textarea {
   .calibration-values {
     padding: 0.75rem;
     border-radius: 16px;
+  }
+
+  .stabilization-layout {
+    gap: 8px;
+  }
+
+  .stabilization-status,
+  .stabilization-gains,
+  .stabilization-corrections {
+    padding: 0.75rem;
+    border-radius: 16px;
+  }
+
+  .gains-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stabilization-metrics {
+    grid-template-columns: 1fr;
   }
 
   .control-summary-grid {

@@ -6,6 +6,7 @@ import URDFLoader, { type URDFRobot } from 'urdf-loader';
 import { XacroLoader } from 'xacro-parser';
 
 import type { ImuOrientation, ImuQuaternion, LegId, LegPreview } from '@/types/control';
+import { imuQuaternionToScene } from '@/utils/imuFrame';
 
 const props = defineProps<{
   legs: LegPreview[];
@@ -212,27 +213,47 @@ function renderScene(): void {
   renderer.render(scene, camera);
 }
 
+const imuScratchQuaternion = new THREE.Quaternion();
+
+// Reused only for the euler fallback path (no `imuQuaternion` payload available). Interprets
+// roll_deg as a rotation about the IMU body's forward (X) axis and pitch_deg as a rotation
+// about the body's left (Y) axis - the standard aerospace roll/pitch convention for the
+// X-forward/Y-left/Z-up body frame documented in `utils/imuFrame.ts`. The previous
+// implementation swapped these into `rotation.set(pitch, roll, 0, 'XYZ')`, which put pitch on
+// the X axis and roll on the Y axis; that mismatch is corrected here alongside the frame fix.
+const imuEulerScratch = new THREE.Euler(0, 0, 0, 'XYZ');
+
+/**
+ * Applies only the IMU-driven root orientation (`robotRoot.quaternion`). Intentionally does
+ * NOT touch joint poses or the focused-leg highlight so that high-rate `sensor_state` updates
+ * don't force a full mesh traversal (see `applyFocusedHighlight`); see the split watchers
+ * below.
+ */
 function applyImuOrientation(): void {
   if (props.imuQuaternion) {
-    robotRoot.quaternion.set(
+    imuScratchQuaternion.set(
       props.imuQuaternion.x,
       props.imuQuaternion.y,
       props.imuQuaternion.z,
       props.imuQuaternion.w,
     );
+    robotRoot.quaternion.copy(imuQuaternionToScene(imuScratchQuaternion));
     return;
   }
 
   if (!props.imuOrientation) {
-    robotRoot.rotation.set(0, 0, 0);
+    robotRoot.quaternion.identity();
     return;
   }
 
   const roll = THREE.MathUtils.degToRad(props.imuOrientation.roll_deg);
   const pitch = THREE.MathUtils.degToRad(props.imuOrientation.pitch_deg);
-  robotRoot.rotation.set(pitch, roll, 0, 'XYZ');
+  imuEulerScratch.set(roll, pitch, 0, 'XYZ');
+  imuScratchQuaternion.setFromEuler(imuEulerScratch);
+  robotRoot.quaternion.copy(imuQuaternionToScene(imuScratchQuaternion));
 }
 
+/** Full pose application: joint angles + focused-leg highlight + IMU orientation. */
 function applyPose(): void {
   if (!robot) {
     return;
@@ -356,8 +377,20 @@ onMounted(async () => {
   }
 });
 
-watch([poseSignature, () => props.focusedLegId, imuSignature], () => {
+// Joint pose / focused-leg changes require the full apply (joint angles + mesh-traversing
+// highlight + IMU orientation + render).
+watch([poseSignature, () => props.focusedLegId], () => {
   applyPose();
+});
+
+// IMU-only updates (potentially at sensor push rate) must stay cheap: only re-orient
+// `robotRoot` and re-render, without re-running `applyFocusedHighlight`'s full mesh traversal.
+watch(imuSignature, () => {
+  if (!robot) {
+    return;
+  }
+  applyImuOrientation();
+  renderScene();
 });
 
 onBeforeUnmount(() => {

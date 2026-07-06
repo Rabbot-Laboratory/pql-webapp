@@ -1,20 +1,41 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 import Button from 'primevue/button';
 import Card from 'primevue/card';
+import ProgressBar from 'primevue/progressbar';
 import Tag from 'primevue/tag';
 
-import type { ImuOrientation, ImuQuaternion, ImuVector, SensorState } from '@/types/control';
+import type { ImuOrientation, ImuQuaternion, ImuVector, MagCalibrationQuality, SensorState } from '@/types/control';
 
-defineProps<{
+// The backend has no fixed sample cap; this is only a UI reference point so the
+// progress bar has something to move against while the user rotates the robot.
+const MAG_CALIBRATION_NOMINAL_SAMPLES = 2000;
+
+const props = defineProps<{
   sensors: SensorState | null;
   busy?: boolean;
+  magCalibrationBusy?: boolean;
+  magCalibrationQuality?: MagCalibrationQuality | null;
 }>();
 
 const emit = defineEmits<{
   calibrateLevel: [];
   calibrateGyro: [];
   resetCalibration: [];
+  startMagCalibration: [];
+  finishMagCalibration: [];
+  cancelMagCalibration: [];
 }>();
+
+const magActive = computed(() => props.sensors?.imu.mag_calibration_active ?? false);
+const magSampleCount = computed(() => props.sensors?.imu.mag_calibration_samples ?? 0);
+const magProgress = computed(() =>
+  Math.min(100, Math.round((magSampleCount.value / MAG_CALIBRATION_NOMINAL_SAMPLES) * 100)),
+);
+const magStartDisabled = computed(
+  () => props.busy || magActive.value || props.magCalibrationBusy || props.sensors?.imu.connection_state !== 'connected',
+);
 
 function formatNumber(value: number | null | undefined, digits = 2): string {
   return value === null || value === undefined ? '-' : value.toFixed(digits);
@@ -139,9 +160,57 @@ function formatVector(vector: ImuVector | null | undefined, unit: string): strin
             />
           </article>
 
+          <article class="calibration-action-card">
+            <h3>3. 磁気較正</h3>
+            <p>ハード/ソフトアイアン誤差を補正し、ヨーの精度を改善します。</p>
+
+            <Button
+              v-if="!magActive"
+              label="磁気較正開始"
+              icon="pi pi-compass"
+              severity="help"
+              :loading="magCalibrationBusy"
+              :disabled="magStartDisabled"
+              @click="emit('startMagCalibration')"
+            />
+
+            <div v-else class="mag-calibration-progress">
+              <p class="mag-calibration-instruction">ロボットを全方向にゆっくり回転させてください。</p>
+              <ProgressBar :value="magProgress" />
+              <span class="mag-calibration-samples">サンプル数: {{ magSampleCount }}</span>
+              <div class="mag-calibration-buttons">
+                <Button
+                  label="完了"
+                  icon="pi pi-check"
+                  severity="success"
+                  :loading="magCalibrationBusy"
+                  :disabled="magCalibrationBusy"
+                  @click="emit('finishMagCalibration')"
+                />
+                <Button
+                  label="キャンセル"
+                  icon="pi pi-times"
+                  severity="danger"
+                  outlined
+                  :disabled="magCalibrationBusy"
+                  @click="emit('cancelMagCalibration')"
+                />
+              </div>
+            </div>
+
+            <div v-if="!magActive && magCalibrationQuality" class="mag-quality-result">
+              <span>前回の結果</span>
+              <strong>
+                サンプル {{ magCalibrationQuality.sample_count }} / 残差
+                {{ formatNumber(magCalibrationQuality.residual, 3) }} / カバレッジ
+                {{ (magCalibrationQuality.coverage * 100).toFixed(0) }}%
+              </strong>
+            </div>
+          </article>
+
           <article class="calibration-action-card is-danger">
             <h3>リセット</h3>
-            <p>保存済みの水平補正とジャイロ補正を初期値に戻します。</p>
+            <p>保存済みの水平補正・ジャイロ補正・磁気較正を初期値に戻します。</p>
             <Button
               label="IMU補正をリセット"
               icon="pi pi-refresh"
@@ -167,6 +236,14 @@ function formatVector(vector: ImuVector | null | undefined, unit: string): strin
           <div>
             <span>Gyro Offset</span>
             <strong>{{ formatVector(sensors?.imu.calibration.gyro_offset_dps, 'deg/s') }}</strong>
+          </div>
+          <div>
+            <span>Mag Offset</span>
+            <strong>{{ formatVector(sensors?.imu.calibration.mag_offset, 'raw') }}</strong>
+          </div>
+          <div>
+            <span>Mag Scale</span>
+            <strong>{{ formatVector(sensors?.imu.calibration.mag_scale, '') }}</strong>
           </div>
         </section>
       </div>
