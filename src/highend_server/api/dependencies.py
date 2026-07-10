@@ -1,6 +1,7 @@
 from fastapi import Request
 
 from highend_server.application.control_service import ControlService
+from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.stabilization import StabilizationController
 from highend_server.config import Settings
 from highend_server.sensors.sensor_service import SensorService
@@ -20,3 +21,7 @@ def get_sensor_service(request: Request) -> SensorService:
 
 def get_stabilization_controller(request: Request) -> StabilizationController:
     return request.app.state.stabilization_controller
+
+
+def get_experiment_recorder(request: Request) -> ExperimentRecorder:
+    return request.app.state.experiment_recorder

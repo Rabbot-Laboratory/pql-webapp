@@ -3,15 +3,25 @@ from fastapi.responses import FileResponse
 
 from highend_server.api.dependencies import (
     get_control_service,
+    get_experiment_recorder,
     get_sensor_service,
     get_stabilization_controller,
 )
 from highend_server.application.control_service import ControlService
+from highend_server.application.experiment import (
+    ExperimentAlreadyRunningError,
+    ExperimentNotRunningError,
+    ExperimentRecorder,
+)
 from highend_server.application.stabilization import StabilizationController
 from highend_server.domain.models import (
     CaptureRequest,
     ConnectionState,
     CsvPlaybackRequest,
+    ExperimentManifest,
+    ExperimentNoteRequest,
+    ExperimentStartRequest,
+    ExperimentSummary,
     FixedMotionRequest,
     HealthResponse,
     ImportLegacyCsvRequest,
@@ -73,12 +83,14 @@ async def get_sensors(service: SensorService = Depends(get_sensor_service)) -> d
 async def calibrate_imu_level(
     service: SensorService = Depends(get_sensor_service),
     controller: StabilizationController = Depends(get_stabilization_controller),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
 ) -> dict:
     _ensure_stabilization_idle(controller)
     try:
         state = await service.calibrate_level()
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    recorder.log_action("calibration", {"action": "level"})
     return {"item": state.model_dump(mode="json")}
 
 
@@ -87,12 +99,14 @@ async def calibrate_imu_gyro_zero(
     request: ImuCalibrationRequest | None = None,
     service: SensorService = Depends(get_sensor_service),
     controller: StabilizationController = Depends(get_stabilization_controller),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
 ) -> dict:
     _ensure_stabilization_idle(controller)
     try:
         state = await service.calibrate_gyro_zero((request or ImuCalibrationRequest()).sample_count)
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    recorder.log_action("calibration", {"action": "gyro_zero"})
     return {"item": state.model_dump(mode="json")}
 
 
@@ -100,12 +114,14 @@ async def calibrate_imu_gyro_zero(
 async def reset_imu_calibration(
     service: SensorService = Depends(get_sensor_service),
     controller: StabilizationController = Depends(get_stabilization_controller),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
 ) -> dict:
     _ensure_stabilization_idle(controller)
     try:
         state = await service.reset_imu_calibration()
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    recorder.log_action("calibration", {"action": "reset"})
     return {"item": state.model_dump(mode="json")}
 
 
@@ -113,12 +129,14 @@ async def reset_imu_calibration(
 async def start_mag_calibration(
     service: SensorService = Depends(get_sensor_service),
     controller: StabilizationController = Depends(get_stabilization_controller),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
 ) -> dict:
     _ensure_stabilization_idle(controller)
     try:
         state = await service.start_mag_calibration()
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    recorder.log_action("calibration", {"action": "mag_start"})
     return {"item": state.model_dump(mode="json")}
 
 
@@ -126,6 +144,7 @@ async def start_mag_calibration(
 async def finish_mag_calibration(
     service: SensorService = Depends(get_sensor_service),
     controller: StabilizationController = Depends(get_stabilization_controller),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
 ) -> dict:
     _ensure_stabilization_idle(controller)
     try:
@@ -134,6 +153,7 @@ async def finish_mag_calibration(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    recorder.log_action("calibration", {"action": "mag_finish"})
     return {
         "item": state.model_dump(mode="json"),
         "quality": quality.model_dump(mode="json"),
@@ -141,8 +161,12 @@ async def finish_mag_calibration(
 
 
 @router.post("/sensors/imu/calibration/mag/cancel")
-async def cancel_mag_calibration(service: SensorService = Depends(get_sensor_service)) -> dict:
+async def cancel_mag_calibration(
+    service: SensorService = Depends(get_sensor_service),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> dict:
     state = await service.cancel_mag_calibration()
+    recorder.log_action("calibration", {"action": "mag_cancel"})
     return {"item": state.model_dump(mode="json")}
 
 
@@ -349,6 +373,59 @@ async def download_latest_telemetry_log(
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="No telemetry log is available yet")
     return FileResponse(path=path, media_type="text/csv", filename=path.name)
+
+
+@router.post("/experiments/start", response_model=ExperimentManifest)
+async def start_experiment(
+    request: ExperimentStartRequest,
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> ExperimentManifest:
+    try:
+        return await recorder.start(request)
+    except ExperimentAlreadyRunningError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/experiments/stop", response_model=ExperimentSummary)
+async def stop_experiment(
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> ExperimentSummary:
+    try:
+        return await recorder.stop()
+    except ExperimentNotRunningError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/experiments/note")
+async def add_experiment_note(
+    request: ExperimentNoteRequest,
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> dict:
+    try:
+        return await recorder.add_note(request.text)
+    except ExperimentNotRunningError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/experiments")
+async def list_experiments(
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> dict:
+    return {
+        "experiments": [
+            manifest.model_dump(mode="json") for manifest in recorder.list_experiments()
+        ]
+    }
+
+
+@router.get("/experiments/latest", response_model=ExperimentManifest)
+async def latest_experiment(
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> ExperimentManifest:
+    manifest = recorder.latest_experiment()
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="no experiments recorded yet")
+    return manifest
 
 
 @router.websocket("/ws")

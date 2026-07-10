@@ -9,8 +9,10 @@ from fastapi.staticfiles import StaticFiles
 from highend_server.api.routes import router
 from highend_server.api.websocket_manager import WebSocketManager
 from highend_server.application.control_service import ControlService
+from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.stabilization import StabilizationController
 from highend_server.config import get_settings
+from highend_server.domain.models import TelemetryEvent
 from highend_server.sensors.sensor_service import SensorService
 from highend_server.transport.serial_gateway import build_gateway
 
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await app.state.experiment_recorder.shutdown()
         await app.state.stabilization_controller.stop()
         await app.state.sensor_service.stop()
         await app.state.control_service.shutdown()
@@ -36,10 +39,19 @@ def create_app() -> FastAPI:
     settings = get_settings()
     websocket_manager = WebSocketManager()
     gateway = build_gateway(settings)
+    # Recorder is created before the services so its event tee can be wired into
+    # each service's event_sink at construction time. It is late-bound to the
+    # services (recorder.bind) once they exist.
+    experiment_recorder = ExperimentRecorder(settings=settings)
+
+    async def event_sink(event: TelemetryEvent) -> None:
+        await websocket_manager.broadcast(event)
+        experiment_recorder.observe_event(event)
+
     control_service = ControlService(
-        settings=settings, gateway=gateway, event_sink=websocket_manager.broadcast
+        settings=settings, gateway=gateway, event_sink=event_sink
     )
-    sensor_service = SensorService(settings=settings, event_sink=websocket_manager.broadcast)
+    sensor_service = SensorService(settings=settings, event_sink=event_sink)
     control_service.set_attitude_provider(sensor_service.latest_attitude)
     control_service.set_level_offsets_provider(sensor_service.level_offsets)
     stabilization_controller = StabilizationController(
@@ -47,8 +59,13 @@ def create_app() -> FastAPI:
         control_service=control_service,
         attitude_provider=sensor_service.latest_attitude,
         level_offsets_provider=sensor_service.level_offsets,
-        event_sink=websocket_manager.broadcast,
+        event_sink=event_sink,
         calibration_lock=sensor_service.calibration_lock,
+    )
+    experiment_recorder.bind(
+        control_service=control_service,
+        stabilization_controller=stabilization_controller,
+        sensor_service=sensor_service,
     )
     # Authoritative (in-lock) side of the "no calibration while stabilization
     # is engaged" invariant; the route-level 409 pre-check alone is racy.
@@ -68,6 +85,7 @@ def create_app() -> FastAPI:
     app.state.control_service = control_service
     app.state.sensor_service = sensor_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.experiment_recorder = experiment_recorder
 
     app.include_router(router, prefix="/api")
     if PQL_A00_DESCRIPTION_DIR.exists():

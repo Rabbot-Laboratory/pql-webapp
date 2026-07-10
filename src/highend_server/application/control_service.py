@@ -6,6 +6,7 @@ import io
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -63,6 +64,37 @@ from highend_server.sensors.sensor_service import AttitudeState
 from highend_server.transport.serial_gateway import SerialGateway
 
 EventSink = Callable[[TelemetryEvent], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ControlSampleRow:
+    """One actuator's control-plane snapshot for experiment logging.
+
+    ``effective_target`` is produced by the SAME per-actuator computation the
+    frame-send path uses (``ControlService._effective_target_for_index``), so
+    the invariant ``effective_target == clamp(base_target + round(correction))``
+    holds by construction.
+    """
+
+    actuator_id: int
+    label: str
+    control_mode: str
+    actual_position: int
+    base_target: int
+    effective_target: int
+    correction: float
+    pressure: int
+
+
+@dataclass(frozen=True, slots=True)
+class ControlSample:
+    """Immutable control-plane snapshot for all actuators at one instant."""
+
+    rows: tuple[ControlSampleRow, ...]
+    playback_row_index: int | None
+    motion_name: str | None
+
+
 # Phase 3: optional attitude access for the CSV playback row-advance guard.
 # Mirrors the provider shape `StabilizationController` already uses.
 AttitudeProvider = Callable[[], AttitudeState | None]
@@ -102,6 +134,9 @@ class ControlService:
         self._current_motion_name: str | None = None
         self._current_motion_category: MotionCategory | None = None
         self._current_motion_loop = False
+        # Index of the CSV playback row currently being driven (experiment log
+        # `motion_frame`). None whenever playback is idle.
+        self._playback_row_index: int | None = None
         self._actuators = self._build_initial_actuators(settings.actuator_count)
         # Phase 2 stabilization composition layer. Corrections are position-target
         # offsets added on top of the user/CSV *base* targets at frame-send time.
@@ -469,7 +504,8 @@ class ControlService:
     async def _run_csv_playback(self, request: CsvPlaybackRequest) -> None:
         try:
             while True:
-                for row in request.rows:
+                for index, row in enumerate(request.rows):
+                    self._playback_row_index = index
                     await self._apply_csv_row(row)
                     if request.advance_mode is PlaybackAdvanceMode.GUARDED:
                         await self._wait_for_row_ready(row, request)
@@ -484,6 +520,7 @@ class ControlService:
             self._current_motion_name = None
             self._current_motion_category = None
             self._current_motion_loop = False
+            self._playback_row_index = None
             await self._emit("csv_playback_status", {"status": self._playback_status.value})
             await self._publish_server_status()
 
@@ -946,14 +983,49 @@ class ControlService:
         end = start + NUM_ESP32_CONTROLLED_ACTUATORS
         return [actuator.target_position for actuator in self._actuators[start:end]]
 
+    def _effective_target_for_index(self, index: int) -> int:
+        """Single actuator's effective position target: clamp(base + round(corr)).
+
+        Sole authority for the base+correction composition. Both the frame-send
+        path (`_effective_position_fields`) and the experiment sampler
+        (`sample_control_snapshot`) route through this so the recorded
+        `effective_target` is identical to what is actually commanded.
+        """
+        effective = self._actuators[index].target_position + int(round(self._corrections[index]))
+        return max(POSITION_MIN, min(POSITION_MAX, effective))
+
     def _effective_position_fields(self, port_role: PortRole) -> list[int]:
         start = 0 if port_role is PortRole.FRONT else NUM_ESP32_CONTROLLED_ACTUATORS
         end = start + NUM_ESP32_CONTROLLED_ACTUATORS
-        fields: list[int] = []
-        for offset, actuator in enumerate(self._actuators[start:end]):
-            effective = actuator.target_position + int(round(self._corrections[start + offset]))
-            fields.append(max(POSITION_MIN, min(POSITION_MAX, effective)))
-        return fields
+        return [self._effective_target_for_index(index) for index in range(start, end)]
+
+    async def sample_control_snapshot(self) -> ControlSample:
+        """Coherent control-plane snapshot of all actuators for experiment logging.
+
+        Builds every row under a single `_lock` acquisition so base target,
+        correction, effective target, actual position and pressure are mutually
+        consistent (no mid-tick interleaving with a correction or telemetry
+        update).
+        """
+        async with self._lock:
+            rows = tuple(
+                ControlSampleRow(
+                    actuator_id=actuator.actuator_id,
+                    label=actuator.label,
+                    control_mode=self._last_mode[actuator.port_role].value,
+                    actual_position=actuator.telemetry.position,
+                    base_target=actuator.target_position,
+                    effective_target=self._effective_target_for_index(actuator.actuator_id),
+                    correction=self._corrections[actuator.actuator_id],
+                    pressure=actuator.telemetry.pressure,
+                )
+                for actuator in self._actuators
+            )
+            return ControlSample(
+                rows=rows,
+                playback_row_index=self._playback_row_index,
+                motion_name=self._current_motion_name,
+            )
 
     @staticmethod
     def _max_abs_diff(a: list[int], b: list[int]) -> int:

@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from highend_server.api.routes import router
 from highend_server.application.control_service import ControlService
+from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.stabilization import StabilizationController
 from highend_server.config import Settings
 from highend_server.sensors.sensor_service import SensorService
@@ -58,6 +59,12 @@ def _make_app(settings: Settings) -> FastAPI:
         level_offsets_provider=sensor_service.level_offsets,
         event_sink=event_sink,
     )
+    experiment_recorder = ExperimentRecorder(settings=settings)
+    experiment_recorder.bind(
+        control_service=control_service,
+        stabilization_controller=stabilization_controller,
+        sensor_service=sensor_service,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -67,6 +74,7 @@ def _make_app(settings: Settings) -> FastAPI:
         try:
             yield
         finally:
+            await experiment_recorder.shutdown()
             await stabilization_controller.stop()
             await sensor_service.stop()
             await control_service.shutdown()
@@ -76,6 +84,7 @@ def _make_app(settings: Settings) -> FastAPI:
     app.state.control_service = control_service
     app.state.sensor_service = sensor_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.experiment_recorder = experiment_recorder
     app.include_router(router, prefix="/api")
     return app
 
