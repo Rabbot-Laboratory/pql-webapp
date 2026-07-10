@@ -6,6 +6,7 @@ import Card from 'primevue/card';
 import ProgressBar from 'primevue/progressbar';
 import Tag from 'primevue/tag';
 
+import ImuOrientationViewport from '@/components/ImuOrientationViewport.vue';
 import type { ImuOrientation, ImuQuaternion, ImuVector, MagCalibrationQuality, SensorState } from '@/types/control';
 
 // The backend has no fixed sample cap; this is only a UI reference point so the
@@ -94,6 +95,12 @@ function formatVector(vector: ImuVector | null | undefined, unit: string): strin
               :value="sensors?.imu.connection_state ?? 'disabled'"
             />
           </div>
+
+          <ImuOrientationViewport
+            :quaternion="sensors?.imu.quaternion ?? null"
+            :orientation="sensors?.imu.orientation ?? null"
+            :connection-state="sensors?.imu.connection_state ?? 'disabled'"
+          />
 
           <div class="orientation-readout">
             <span>補正後</span>
