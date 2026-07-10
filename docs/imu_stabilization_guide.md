@@ -229,3 +229,66 @@ WebSocket でも `stabilization_state` イベントが配信され(状態遷移�
 | `kd_pitch` | 0.3 |
 
 積分ゲインはデフォルト 0(純粋な PD)。起動直後のワインドアップを避けるため、P/D の挙動を実機で確認してから小さい Ki(0.02〜0.05 程度)を試すこと。
+
+---
+
+## 7. 実験の記録と再生(experiment/2026-07-11 以降)
+
+### 実験の1コマンド操作(`scripts/robotctl.py`)
+
+サーバー起動後、追加依存なし(標準ライブラリのみ)で使える操作系:
+
+```bash
+python scripts/robotctl.py preflight              # 環境・ハードウェアの事前点検
+python scripts/robotctl.py status                 # サーバー/再生/記録/安定化の要約
+python scripts/robotctl.py sensors                # IMUスナップショット
+python scripts/robotctl.py stabilization-status   # ゲイン・補正値・D項モード
+
+python scripts/robotctl.py experiment start manual-roll --name "Roll試験A"
+python scripts/robotctl.py experiment note "ここで手で右に傾けた"
+python scripts/robotctl.py experiment stop
+python scripts/robotctl.py experiment list
+python scripts/robotctl.py experiment show latest
+```
+
+リモートのPiに対しては `--host 192.168.x.x:8000` を付ける。危険操作(アクチュエータ駆動・安定化ON)は意図的に**含めていない** — それらはGUIか直接APIで行う。
+
+### 実験ログの構造
+
+`experiment start` ごとに `Logs/experiments/<YYYYMMDD_HHMMSS>_<type>/` が作られる:
+
+- `manifest.json` — git SHA/ブランチ/dirty、全ゲイン、Mahony設定、D項モード、config全スナップショット。「このログのときKpいくつだっけ?」を根絶する
+- `telemetry.csv` — 25Hz×8アクチュエータのlong format(37列)。各行で `base_target + round(stabilization_correction) == effective_target` が成立し、CSV再生の要求・IMU制御の上乗せ・実際の動きを1本の時系列で追える。IMU列(roll/pitch/yaw、gyro、accel、mag)と `accel_confidence_candidate`(|accel|-1g による high/medium/low、**記録のみ・制御非結合**)を含む
+- `events.jsonl` — 安定化ON/OFF/自動無効化、再生イベント、較正、note を時刻付きで記録
+- `notes.md` — 自由記入
+
+時間軸は `elapsed_ms`(monotonic)が正。`timestamp` はNTP同期でジャンプし得る(PiはRTCなし)。既存の `/api/telemetry/recording` とは独立に併用可能だが、Pi上で両方を高レートで同時使用するのはSDカードIO的に非推奨。
+
+### 仮想IMUシナリオ(実機なしで制御試験)
+
+```bash
+HIGHEND_EMULATED_IMU_SCENARIO=roll-step HIGHEND_EMULATE_DEVICES=true python -m highend_server
+```
+
+シナリオ: `smooth`(既定)/ `static` / `roll-step`(2〜5秒に+10°)/ `pitch-step` / `diagonal-step` / `impulse` / `oscillation`(0.5Hz)/ `gyro-bias` / `accel-disturbance`(姿勢0°のまま前方0.35g — Mahonyの並進誤認テスト)/ `sensor-stale`(鮮度切れ自動無効化の発火試験)/ `sensor-nan`(非有限値ガードの試験)
+
+### ジャイロD項の比較(A/B実験用)
+
+```bash
+HIGHEND_STABILIZATION_DERIVATIVE_SOURCE=gyro_rate python -m highend_server
+```
+
+- `error_difference`(既定): D = 姿勢誤差の差分/dt(従来)
+- `gyro_rate`: D項にジャイロレートを直接使用(Roll: -gyro_x / Pitch: -gyro_y)。フュージョン角の二重微分を避けノイズ増幅が小さい
+
+使用モードは manifest.json と `stabilization-status` に記録されるため、翌日のログ比較で条件を取り違えない。
+
+### 実機ログの再生(リモート開発用)
+
+```bash
+python -m highend_server --replay Logs/experiments/20260711_143522_roll_test/ [--replay-speed 2.0]
+```
+
+記録済みのIMU生データ(gyro/accel/mag)を**そのままMahonyフィルタに再入力**する。姿勢推定・IMU信頼度・制御量計算・ゲイン候補比較を、実機なしで同一入力に対して何度でも試せる(アクチュエータ応答は変わらないため完全なシミュレーションではない)。
+
+注意: CSVはバイアス補正済みの値を保存しているため、`--replay` は較正の二重適用を防ぐために自動で空の一時configディレクトリを使う(手動で `HIGHEND_SENSOR_CONFIG_DIR_NAME` を設定した場合はそちらが優先)。
