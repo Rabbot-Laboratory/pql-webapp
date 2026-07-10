@@ -14,8 +14,8 @@ import * as THREE from 'three';
  *
  * The X/Y split (which axis is "forward" vs "left") cannot be derived from the fusion math
  * alone (roll/pitch are symmetric in the Mahony equations) - it depends on how the BMX055 is
- * physically mounted on the chassis. We assume the common default called out in
- * `docs/imu_control_optimization_plan.md` §4-1: **X-forward / Y-left / Z-up** (a right-handed
+ * physically mounted on the chassis. We assume the convention documented in
+ * `src/highend_server/sensors/attitude.py`: **X-forward / Y-left / Z-up** (a right-handed
  * frame, matching the ROS REP-103 `base_link` convention). This is a documented assumption,
  * not a hardware-verified fact - see "Adjusting on real hardware" below.
  *

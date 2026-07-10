@@ -1,13 +1,11 @@
 # Air Compressor Robot
 
-This repository currently contains two generations of the control stack.
+Browser-first control stack for the pneumatic quadruped robot.
 
-- Legacy Raspberry Pi control module: `Highend_Ctrl_mod.py`
-- Legacy native GUI: `Native_GuiApp_main2.py`
-- New browser-first server scaffold: `src/highend_server/`
-- Production-oriented Vue UI scaffold: `web-vue/`
+- FastAPI control server: `src/highend_server/`
+- Production Vue UI: `web-vue/`
 
-## New server scaffold
+## Server
 
 Install the new server in editable mode:
 
@@ -207,8 +205,8 @@ Run the Vite development server:
 npm run dev
 ```
 
-When `web-vue/dist` exists, the FastAPI app serves it automatically instead of
-the legacy `web/` directory.
+Build `web-vue/dist` (`npm run build`) and the FastAPI app serves it
+automatically at `/`.
 
 Main endpoints:
 
@@ -242,8 +240,8 @@ src/highend_server/
   domain/        Shared application models
   protocol/      64-bit ESP32 frame encoding and decoding
   transport/     Serial gateway boundary
-tests/           Protocol-focused unit tests
-web/             Future browser client
+tests/           Unit and API tests
+web-vue/         Production Vue 3 UI
 ```
 
 ## Migration intent

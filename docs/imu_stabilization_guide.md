@@ -1,7 +1,6 @@
 # IMU 姿勢スタビライゼーション 運用ガイド
 
 対象: BMX055 IMU による胴体水平維持(姿勢フィードバック制御)機能。
-実装計画は `docs/imu_control_optimization_plan.md`(Phase 2/3)を参照。
 
 ---
 

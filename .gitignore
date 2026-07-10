@@ -12,15 +12,9 @@ build/
 web-vue/docs/
 web-vue/Motion/
 web-vue/pql-a00_description/
-web-vue/PQL-LG00-A1_description/
 web-vue/scripts/
 web-vue/tests/
-web-vue/web/
-web-vue/Highend_Ctrl_mod.py
-web-vue/layout.kv
-web-vue/Native_GuiApp_main2.py
 web-vue/pyproject.toml
-web-vue/Rabbot-labo*.png
 web-vue/build.log
 web-vue/src/highend_server/
 web-vue/src/highend_control_server.egg-info/

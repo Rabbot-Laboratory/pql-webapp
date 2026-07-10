@@ -1,11 +1,9 @@
 # Air Compressor Robot
 
-This repository currently contains two generations of the control stack.
+Browser-first control stack for the pneumatic quadruped robot.
 
-- Legacy Raspberry Pi control module: `Highend_Ctrl_mod.py`
-- Legacy native GUI: `Native_GuiApp_main2.py`
-- New browser-first server scaffold: `src/highend_server/`
-- Production-oriented Vue UI scaffold: `web-vue/`
+- FastAPI control server: `src/highend_server/`
+- Production Vue UI: `web-vue/`
 
 ## New server scaffold
 

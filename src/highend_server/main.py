@@ -14,7 +14,6 @@ from highend_server.config import get_settings
 from highend_server.sensors.sensor_service import SensorService
 from highend_server.transport.serial_gateway import build_gateway
 
-LEGACY_WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 VUE_WEB_DIST_DIR = Path(__file__).resolve().parents[2] / "web-vue" / "dist"
 PQL_A00_DESCRIPTION_DIR = Path(__file__).resolve().parents[2] / "pql-a00_description"
 PQL_A00_MESH_DIR = Path(__file__).resolve().parents[2] / "pql-a00_description" / "meshes"
@@ -83,9 +82,8 @@ def create_app() -> FastAPI:
             StaticFiles(directory=PQL_A00_MESH_DIR),
             name="pql-a00-meshes",
         )
-    web_dir = VUE_WEB_DIST_DIR if VUE_WEB_DIST_DIR.exists() else LEGACY_WEB_DIR
-    if web_dir.exists():
-        app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
+    if VUE_WEB_DIST_DIR.exists():
+        app.mount("/", StaticFiles(directory=VUE_WEB_DIST_DIR, html=True), name="web")
     return app
 
 
