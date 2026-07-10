@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite, pi, sin, sqrt
+from pathlib import Path
 from time import monotonic
 from typing import Protocol
 
@@ -44,6 +45,7 @@ from highend_server.sensors.imu_bmx055 import Bmx055Reader, Bmx055Reading, Vecto
 from highend_server.sensors.imu_scenarios import ScenarioFn, get_scenario
 from highend_server.sensors.mag_calibration import apply_calibration as apply_mag_calibration
 from highend_server.sensors.mag_calibration import fit as fit_mag_calibration
+from highend_server.sensors.replay_source import ReplayImuSource
 
 EventSink = Callable[[TelemetryEvent], Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -707,6 +709,14 @@ class SensorService:
     # -- device management --------------------------------------------------
 
     def _make_imu_source(self) -> ImuSource:
+        # Highest precedence: an explicit replay directory always wins, even
+        # over emulate_devices, so `--replay` behaves predictably regardless
+        # of what else is set.
+        if self.settings.replay_dir:
+            return ReplayImuSource(
+                Path(self.settings.replay_dir),
+                time_scale=self.settings.replay_time_scale,
+            )
         if self._use_emulated_sensors:
             return EmulatedImuSource(scenario=self.settings.emulated_imu_scenario)
         return RealImuSource(self.settings)
