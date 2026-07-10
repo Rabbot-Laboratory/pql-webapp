@@ -403,6 +403,56 @@ class StabilizationRequest(BaseModel):
     gains: StabilizationGains | None = None
 
 
+class ExperimentStartRequest(BaseModel):
+    experiment_type: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, max_length=128)
+
+
+class ExperimentNoteRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ExperimentGitInfo(BaseModel):
+    sha: str = "unknown"
+    branch: str = "unknown"
+    dirty: bool | None = None
+
+
+class ExperimentManifest(BaseModel):
+    schema_version: int = 1
+    experiment_id: str
+    experiment_type: str
+    name: str | None = None
+    robot: str = "PQL-A00"
+    package_version: str = "unknown"
+    git: ExperimentGitInfo = Field(default_factory=ExperimentGitInfo)
+    started_at: datetime
+    ended_at: datetime | None = None
+    sample_rate_hz: float
+    stabilization: dict
+    imu: dict
+    config_snapshot: dict
+    row_counts: dict | None = None
+
+
+class ExperimentSummary(BaseModel):
+    manifest: ExperimentManifest
+    directory: str
+    duration_sec: float
+    telemetry_rows: int
+    event_count: int
+    telemetry_bytes: int
+
+
+class ExperimentStatus(BaseModel):
+    running: bool
+    experiment_id: str | None = None
+    directory: str | None = None
+    elapsed_sec: float | None = None
+    telemetry_rows: int = 0
+    event_count: int = 0
+
+
 class TelemetryEvent(BaseModel):
     type: str
     timestamp: datetime = Field(default_factory=utc_now)

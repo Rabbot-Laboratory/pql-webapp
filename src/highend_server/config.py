@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -93,6 +94,41 @@ class Settings(BaseSettings):
     # per playback request via `CsvPlaybackRequest.attitude_guard_deg`.
     playback_attitude_guard_deg: float | None = Field(default=None, ge=0.0)
 
+    # --- Experiment logging (per-run directory under Logs/experiments/) -----
+    experiment_log_dir_name: str = "experiments"
+    # Sampler rate for the experiment telemetry CSV. 25 Hz matches the
+    # stabilization loop (corrections change at most 25x/s) and keeps SD-card
+    # IO on the Pi to ~200 rows/s (~200 MB/h in long format). Raise only for
+    # short high-resolution runs.
+    experiment_sample_rate_hz: float = Field(default=25.0, gt=0.0, le=100.0)
+    # CSV/JSONL flush cadence. Never line-buffer the experiment CSV: at
+    # 200 rows/s per-line flushes would hammer the SD card.
+    experiment_flush_interval_sec: float = Field(default=1.0, gt=0.0)
+    experiment_robot_name: str = "PQL-A00"
+
+    # --- Replay mode (python -m highend_server --replay <experiment_dir>) ---
+    # When set, SensorService feeds the recorded IMU stream from the given
+    # experiment directory instead of real/emulated hardware.
+    replay_dir: str | None = None
+    replay_time_scale: float = Field(default=1.0, gt=0.0)
+
+    # --- Emulated IMU scenario (HIGHEND_EMULATED_IMU_SCENARIO) --------------
+    # Profile used by EmulatedImuSource. "smooth" is the legacy sinusoid
+    # behaviour; see sensors/imu_scenarios.py for the full catalogue
+    # (static, roll-step, pitch-step, diagonal-step, impulse, oscillation,
+    # gyro-bias, accel-disturbance, sensor-stale, sensor-nan).
+    emulated_imu_scenario: str = "smooth"
+
+    # --- Stabilization derivative source ------------------------------------
+    # "error_difference": D = d(attitude error)/dt (finite difference, legacy).
+    # "gyro_rate": D uses the bias-corrected gyro rate directly
+    # (roll: -gyro_x, pitch: -gyro_y) — less noise amplification, no
+    # double-differentiation of the fused angle. Runtime-selectable so A/B
+    # comparison on real hardware uses identical code paths.
+    stabilization_derivative_source: Literal["error_difference", "gyro_rate"] = (
+        "error_difference"
+    )
+
     @property
     def project_root(self) -> Path:
         return Path(__file__).resolve().parents[2]
@@ -128,6 +164,10 @@ class Settings(BaseSettings):
     @property
     def stabilization_config_path(self) -> Path:
         return self.sensor_config_path / self.stabilization_config_file_name
+
+    @property
+    def experiment_log_root_path(self) -> Path:
+        return self.telemetry_log_root_path / self.experiment_log_dir_name
 
 
 @lru_cache(maxsize=1)
