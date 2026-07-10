@@ -159,7 +159,16 @@ class AxisPid:
         self.ki = ki
         self.kd = kd
 
-    def step(self, error: float, dt: float) -> float:
+    def step(self, error: float, dt: float, rate: float | None = None) -> float:
+        """Run one PID update.
+
+        ``rate``, when given, is ``d(error)/dt`` supplied directly by the
+        caller (e.g. derived from the gyro) instead of finite-differencing
+        ``error`` here. ``_prev_error`` is still updated in that case so
+        switching back to finite-difference mode mid-flight (rate becomes
+        None on a later call) is seamless rather than producing one bogus
+        derivative spike from a stale ``_prev_error``.
+        """
         if self.ki > 0.0 and dt > 0.0:
             self._integral += error * dt
             # Anti-windup: clamp the accumulator so it can never run away while
@@ -168,9 +177,12 @@ class AxisPid:
         else:
             self._integral = 0.0
 
-        derivative = 0.0
-        if self._prev_error is not None and dt > 0.0:
-            derivative = (error - self._prev_error) / dt
+        if rate is not None:
+            derivative = rate
+        else:
+            derivative = 0.0
+            if self._prev_error is not None and dt > 0.0:
+                derivative = (error - self._prev_error) / dt
         self._prev_error = error
 
         output = self.kp * error + self.ki * self._integral + self.kd * derivative
@@ -210,6 +222,11 @@ class StabilizationController:
         persisted = self._load_config()
         self._gains = persisted.gains
         self._mixing = self._validate_mixing(persisted.mixing_matrix)
+
+        # Read once at construction: the loop always uses one strategy per
+        # process lifetime, matching how gains/mixing are loaded (a config
+        # change requires a restart, same as other stabilization settings).
+        self._derivative_source = settings.stabilization_derivative_source
 
         self._max_correction = settings.stabilization_max_correction
         self._pid_roll = AxisPid(
@@ -353,6 +370,7 @@ class StabilizationController:
             corrections=corrections,
             loop_rate_hz=self._loop_rate_hz,
             attitude_stale=self._attitude_stale,
+            derivative_source=self._derivative_source,
             updated_at=utc_now(),
         )
 
@@ -482,8 +500,25 @@ class StabilizationController:
             self._pitch_deg = pitch
             self._roll_error_deg = 0.0 - roll
             self._pitch_error_deg = 0.0 - pitch
-            u_roll = self._pid_roll.step(self._roll_error_deg, dt)
-            u_pitch = self._pid_pitch.step(self._pitch_error_deg, dt)
+
+            # gyro_rate mode feeds the D-term straight from the bias-corrected
+            # gyro (roll rate = -gyro_x, pitch rate = -gyro_y — error = -attitude,
+            # so d(error)/dt = -d(attitude)/dt = -gyro; see module docstring for
+            # the body-frame sign convention) instead of finite-differencing the
+            # fused angle, which double-differentiates noise. Any non-finite
+            # gyro sample (e.g. the sensor-nan scenario) falls back to None
+            # (finite-difference) for that tick only — never let a NaN rate
+            # reach the PID output.
+            roll_rate: float | None = None
+            pitch_rate: float | None = None
+            if self._derivative_source == "gyro_rate":
+                gyro = snapshot.gyro_dps
+                if isfinite(gyro.x) and isfinite(gyro.y):
+                    roll_rate = -gyro.x
+                    pitch_rate = -gyro.y
+
+            u_roll = self._pid_roll.step(self._roll_error_deg, dt, rate=roll_rate)
+            u_pitch = self._pid_pitch.step(self._pitch_error_deg, dt, rate=pitch_rate)
             desired = [
                 _clamp(
                     self._mixing[i][0] * u_roll + self._mixing[i][1] * u_pitch,

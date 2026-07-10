@@ -395,6 +395,10 @@ class StabilizationState(BaseModel):
     corrections: list[StabilizationCorrection] = Field(default_factory=list)
     loop_rate_hz: float = 0.0
     attitude_stale: bool = False
+    # "error_difference" (legacy finite-difference D-term) or "gyro_rate"
+    # (D-term sourced from the bias-corrected gyro). Additive/backward
+    # compatible: existing clients that ignore this field are unaffected.
+    derivative_source: str = "error_difference"
     updated_at: datetime = Field(default_factory=utc_now)
 
 

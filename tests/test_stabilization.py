@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from highend_server.application.control_service import ControlService
 from highend_server.application.stabilization import (
     DEFAULT_MIXING_MATRIX,
@@ -66,6 +68,27 @@ def _settings(**overrides) -> Settings:
     base = dict(emulate_devices=True, actuator_count=8)
     base.update(overrides)
     return Settings(**base)
+
+
+def make_attitude_with_gyro(
+    roll: float, pitch: float, timestamp: float, gyro_dps: Vector3
+) -> AttitudeState:
+    """Like ``make_attitude`` but with a caller-supplied (bias-corrected) gyro,
+    for exercising the "gyro_rate" derivative source."""
+    return AttitudeState(
+        quaternion=euler_to_quat(roll, pitch, 0.0),
+        euler=EulerAngles(roll_deg=roll, pitch_deg=pitch, yaw_deg=0.0),
+        gravity_g=Vector3(0.0, 0.0, 1.0),
+        linear_accel_g=_zero(),
+        accel_g=Vector3(0.0, 0.0, 1.0),
+        gyro_dps=gyro_dps,
+        raw_gyro_dps=_zero(),
+        mag=_zero(),
+        mag_valid=False,
+        temperature_c=None,
+        timestamp=timestamp,
+        sample_count=1,
+    )
 
 
 def _build(tmp_path, settings=None, attitude=None, gains=None, calibration_lock=None):
@@ -770,3 +793,137 @@ def test_actuator_count_beyond_default_mixing_matrix_raises(tmp_path) -> None:
         assert "mixing" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected ValueError for oversized actuator_count")
+
+
+# --------------------------------------------------------------------------
+# gyro_rate derivative source
+# --------------------------------------------------------------------------
+
+
+def test_axis_pid_rate_overrides_finite_difference_and_keeps_prev_error_in_sync() -> None:
+    pid = AxisPid(kp=0.0, ki=0.0, kd=1.0, integral_limit=100.0, output_limit=1000.0)
+
+    # First call: no _prev_error yet, so even without `rate` the derivative is 0.
+    assert pid.step(error=5.0, dt=1.0) == 0.0
+
+    # `rate` is used verbatim (not the finite difference, which would be 0
+    # since the error didn't change) -- proves `rate` really overrides.
+    assert pid.step(error=5.0, dt=1.0, rate=3.0) == 3.0
+
+    # Switching back to finite-difference mode must use the *actual* error
+    # history (5.0 -> 8.0), not something poisoned by the `rate` call.
+    assert pid.step(error=8.0, dt=1.0) == pytest.approx(3.0)  # (8.0 - 5.0) / 1.0
+
+
+def test_get_state_reports_configured_derivative_source(tmp_path) -> None:
+    default_controller, *_ = _build(tmp_path / "a")
+    assert default_controller.get_state().derivative_source == "error_difference"
+
+    gyro_settings = _settings(stabilization_derivative_source="gyro_rate")
+    gyro_controller, *_ = _build(tmp_path / "b", settings=gyro_settings)
+    assert gyro_controller.get_state().derivative_source == "gyro_rate"
+
+
+def test_gyro_rate_mode_derivative_equals_negative_gyro_times_kd(tmp_path) -> None:
+    """With kp=ki=0, the whole per-axis PID output collapses to kd * D, so the
+    correction directly exposes the D-term: gyro_rate must equal
+    kd * (-gyro_x) for roll and kd * (-gyro_y) for pitch (see the module
+    docstring's sign convention: error = -attitude => d(error)/dt = -gyro)."""
+
+    async def scenario() -> None:
+        gains = StabilizationGains(
+            kp_roll=0.0, ki_roll=0.0, kd_roll=2.0, kp_pitch=0.0, ki_pitch=0.0, kd_pitch=3.0
+        )
+        settings = _settings(stabilization_derivative_source="gyro_rate")
+        controller, _c, _gw, holder, clock, _e = _build(tmp_path, settings=settings, gains=gains)
+        controller._enable()
+        gyro = Vector3(4.0, -6.0, 0.0)
+        holder["attitude"] = make_attitude_with_gyro(
+            roll=0.0, pitch=0.0, timestamp=clock(), gyro_dps=gyro
+        )
+        await _step_dt(controller, clock, 1.0)
+
+        u_roll_expected = 2.0 * -gyro.x  # kd_roll * (-gyro_x)
+        u_pitch_expected = 3.0 * -gyro.y  # kd_pitch * (-gyro_y)
+        for i in range(8):
+            expected = (
+                DEFAULT_MIXING_MATRIX[i][0] * u_roll_expected
+                + DEFAULT_MIXING_MATRIX[i][1] * u_pitch_expected
+            )
+            assert controller._corrections[i] == pytest.approx(expected, abs=1e-6)
+
+    asyncio.run(scenario())
+
+
+def test_gyro_rate_mode_differs_from_error_difference_on_first_tick(tmp_path) -> None:
+    """error_difference has no _prev_error on the very first tick, so its D
+    contribution is 0 there; gyro_rate has no such warm-up requirement,
+    proving the two modes are genuinely different code paths, not just
+    differently-tuned versions of the same math."""
+
+    async def scenario() -> None:
+        gains = StabilizationGains(
+            kp_roll=0.0, ki_roll=0.0, kd_roll=1.0, kp_pitch=0.0, ki_pitch=0.0, kd_pitch=1.0
+        )
+        gyro = Vector3(4.0, 0.0, 0.0)
+
+        diff_controller, _c1, _gw1, holder1, clock1, _e1 = _build(
+            tmp_path / "diff", settings=_settings(), gains=gains
+        )
+        diff_controller._enable()
+        holder1["attitude"] = make_attitude_with_gyro(
+            roll=0.0, pitch=0.0, timestamp=clock1(), gyro_dps=gyro
+        )
+        await _step_dt(diff_controller, clock1, 1.0)
+
+        rate_controller, _c2, _gw2, holder2, clock2, _e2 = _build(
+            tmp_path / "rate",
+            settings=_settings(stabilization_derivative_source="gyro_rate"),
+            gains=gains,
+        )
+        rate_controller._enable()
+        holder2["attitude"] = make_attitude_with_gyro(
+            roll=0.0, pitch=0.0, timestamp=clock2(), gyro_dps=gyro
+        )
+        await _step_dt(rate_controller, clock2, 1.0)
+
+        assert diff_controller._corrections[0] == pytest.approx(0.0, abs=1e-9)
+        assert rate_controller._corrections[0] != pytest.approx(0.0, abs=1e-9)
+
+    asyncio.run(scenario())
+
+
+def test_gyro_rate_mode_falls_back_to_finite_difference_on_nonfinite_gyro(tmp_path) -> None:
+    """A non-finite gyro sample (e.g. the sensor-nan emulated scenario) must
+    fall back to the error_difference derivative for that tick rather than
+    ever letting NaN reach the PID output."""
+
+    async def scenario() -> None:
+        gains = StabilizationGains(
+            kp_roll=0.0, ki_roll=0.0, kd_roll=1.0, kp_pitch=0.0, ki_pitch=0.0, kd_pitch=1.0
+        )
+        settings = _settings(stabilization_derivative_source="gyro_rate")
+        controller, _c, _gw, holder, clock, _e = _build(tmp_path, settings=settings, gains=gains)
+        controller._enable()
+
+        # Step 1: finite gyro (rate=0) just to prime _prev_error at roll=5.0.
+        holder["attitude"] = make_attitude_with_gyro(
+            roll=5.0, pitch=0.0, timestamp=clock(), gyro_dps=Vector3(0.0, 0.0, 0.0)
+        )
+        await _step_dt(controller, clock, 1.0)
+
+        # Step 2: non-finite gyro -> must fall back to finite difference:
+        # error1 = 0-5=-5, error2 = 0-9=-9 -> (-9 - -5) / 1.0 = -4.0.
+        nan = float("nan")
+        holder["attitude"] = make_attitude_with_gyro(
+            roll=9.0, pitch=0.0, timestamp=clock(), gyro_dps=Vector3(nan, nan, 0.0)
+        )
+        await _step_dt(controller, clock, 1.0)
+
+        u_roll_expected = 1.0 * -4.0  # kd_roll * finite-difference derivative
+        for i in range(8):
+            expected = DEFAULT_MIXING_MATRIX[i][0] * u_roll_expected
+            assert controller._corrections[i] == pytest.approx(expected, abs=1e-6)
+            assert controller._corrections[i] == controller._corrections[i]  # not NaN
+
+    asyncio.run(scenario())

@@ -41,6 +41,7 @@ from highend_server.sensors.attitude import (
     rotate_vector_by_quat_inverse,
 )
 from highend_server.sensors.imu_bmx055 import Bmx055Reader, Bmx055Reading, Vector3
+from highend_server.sensors.imu_scenarios import ScenarioFn, get_scenario
 from highend_server.sensors.mag_calibration import apply_calibration as apply_mag_calibration
 from highend_server.sensors.mag_calibration import fit as fit_mag_calibration
 
@@ -167,13 +168,40 @@ class EmulatedImuSource:
     magnetometer is a fixed world field rotated into the body frame, and the gyro
     is derived by finite-differencing the attitude so it stays consistent with
     the accel/mag references (the Mahony filter then converges cleanly).
+
+    ``scenario`` selects the attitude/fault-injection profile (see
+    ``sensors/imu_scenarios.py``); it defaults to ``"smooth"``, the legacy
+    waveform. Two fault flags on the scenario sample are handled here rather
+    than in the pipeline:
+
+    * ``inject_nan``: the accel/gyro components emitted this cycle are
+      replaced with NaN. ``MahonyMARG.update()`` fails closed on non-finite
+      input (holds the previous, finite quaternion/euler) so the fused
+      attitude never gets corrupted, while the raw accel/gyro pass-through
+      still shows NaN — an honest reflection of the (simulated) sensor fault.
+    * ``hold_stale``: rather than returning a frozen-but-fresh reading (which
+      would NOT trip staleness — ``ImuPipeline`` stamps ``AttitudeState.
+      timestamp`` with ``now()`` every cycle regardless of whether the values
+      changed), this raises so ``ImuPipeline._run``'s existing per-cycle
+      exception handler runs instead: it logs the error, keeps the thread
+      alive, but never calls ``self._shared.set(...)`` again. The last
+      published snapshot's ``timestamp`` then genuinely stops advancing,
+      which is what the stabilization staleness/health checks actually key
+      on. Raising (vs. blocking the thread forever) also keeps `stop()`'s
+      `join()` responsive.
     """
 
-    def __init__(self, *, time_fn: Callable[[], float] = monotonic) -> None:
+    def __init__(
+        self,
+        *,
+        time_fn: Callable[[], float] = monotonic,
+        scenario: str | ScenarioFn = "smooth",
+    ) -> None:
         self._time_fn = time_fn
         self._start = time_fn()
         self._prev_q: Quaternion | None = None
         self._prev_t: float | None = None
+        self._scenario_fn: ScenarioFn = scenario if callable(scenario) else get_scenario(scenario)
 
     def open(self) -> None:
         self._start = self._time_fn()
@@ -186,17 +214,18 @@ class EmulatedImuSource:
     def read(self) -> Bmx055Reading:
         t = self._time_fn()
         elapsed = t - self._start
+        sample = self._scenario_fn(elapsed)
 
-        roll_deg = 12.0 * sin(elapsed * 0.85)
-        pitch_deg = 8.0 * sin(elapsed * 0.57 + 0.9)
-        yaw_deg = elapsed * 20.0  # unwrapped for a continuous quaternion
-        q = euler_to_quat(roll_deg, pitch_deg, yaw_deg)
+        if sample.hold_stale:
+            raise RuntimeError("emulated IMU: sensor read stalled (scenario hold_stale)")
+
+        q = euler_to_quat(sample.roll_deg, sample.pitch_deg, sample.yaw_deg)
 
         gravity = gravity_from_quat(q)
         accel = Vector3(
-            x=gravity.x + 0.015 * sin(elapsed * 4.2),
-            y=gravity.y + 0.012 * sin(elapsed * 3.1),
-            z=gravity.z + 0.01 * sin(elapsed * 2.3),
+            x=gravity.x + 0.015 * sin(elapsed * 4.2) + sample.accel_extra_g.x,
+            y=gravity.y + 0.012 * sin(elapsed * 3.1) + sample.accel_extra_g.y,
+            z=gravity.z + 0.01 * sin(elapsed * 2.3) + sample.accel_extra_g.z,
         )
 
         world_mag = Vector3(22.0, 0.0, -40.0)
@@ -207,8 +236,18 @@ class EmulatedImuSource:
             gyro = _angular_velocity_dps(self._prev_q, q, dt)
         else:
             gyro = Vector3(0.0, 0.0, 0.0)
+        gyro = Vector3(
+            x=gyro.x + sample.gyro_bias_dps.x,
+            y=gyro.y + sample.gyro_bias_dps.y,
+            z=gyro.z + sample.gyro_bias_dps.z,
+        )
         self._prev_q = q
         self._prev_t = t
+
+        if sample.inject_nan:
+            nan = float("nan")
+            accel = Vector3(nan, nan, nan)
+            gyro = Vector3(nan, nan, nan)
 
         return Bmx055Reading(
             accel_g=accel,
@@ -669,7 +708,7 @@ class SensorService:
 
     def _make_imu_source(self) -> ImuSource:
         if self._use_emulated_sensors:
-            return EmulatedImuSource()
+            return EmulatedImuSource(scenario=self.settings.emulated_imu_scenario)
         return RealImuSource(self.settings)
 
     async def _open_imu(self) -> None:

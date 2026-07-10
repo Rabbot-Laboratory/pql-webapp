@@ -1,12 +1,16 @@
 import asyncio
+import logging
 import threading
-from math import cos, pi, sin
+import time
+from math import cos, isfinite, pi, sin
 
 from highend_server.config import Settings
 from highend_server.domain.models import ImuCalibration, SensorConnectionState, TelemetryEvent
+from highend_server.sensors.attitude import DEG_TO_RAD, MahonyMARG
 from highend_server.sensors.imu_bmx055 import Bmx055Reading, Vector3
+from highend_server.sensors.imu_scenarios import ScenarioSample
 from highend_server.sensors.mag_calibration import MIN_SAMPLES
-from highend_server.sensors.sensor_service import ImuPipeline, SensorService
+from highend_server.sensors.sensor_service import EmulatedImuSource, ImuPipeline, SensorService
 
 
 def _emulated_settings(**overrides) -> Settings:
@@ -620,3 +624,142 @@ def test_failed_mag_fit_preserves_samples_and_resumes_collection() -> None:
         assert pipeline.mag_collection_active is True
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Emulated IMU scenarios
+# ---------------------------------------------------------------------------
+
+
+def test_emulated_imu_source_roll_step_scenario_drives_attitude_progression() -> None:
+    """EmulatedImuSource(scenario="roll-step") feeds a Mahony filter exactly like
+    ImuPipeline does; the fused roll should track the step (0 deg, then +10 deg
+    during 2s-5s, then back to 0 deg) because the finite-difference gyro
+    reproduces the step's instantaneous rate, so convergence is fast rather
+    than depending on the slow accel/mag correction term."""
+    step_dt = 0.01  # 100 Hz, same as the production imu_sample_rate_hz default
+
+    class _VirtualClock:
+        """Deterministic fake clock: advances by ``step_dt`` on every call.
+
+        EmulatedImuSource computes its own "elapsed" from this same clock
+        (matching how ImuPipeline wires a shared ``time_fn``), so driving the
+        filter in lockstep with real per-cycle time_fn calls (rather than a
+        real wall-clock sleep loop) is fast and fully deterministic.
+        """
+
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            self.t += step_dt
+            return self.t
+
+    source = EmulatedImuSource(time_fn=_VirtualClock(), scenario="roll-step")
+    filt = MahonyMARG(kp=0.8, ki=0.02)  # same defaults as ImuPipeline
+
+    checkpoints = {1.0: None, 3.0: None, 6.0: None}
+    elapsed = 0.0
+    total = int(6.5 / step_dt)
+    for _ in range(total):
+        reading = source.read()
+        gyro_rad = Vector3(
+            reading.gyro_dps.x * DEG_TO_RAD,
+            reading.gyro_dps.y * DEG_TO_RAD,
+            reading.gyro_dps.z * DEG_TO_RAD,
+        )
+        result = filt.update(
+            gyro_rad=gyro_rad, accel_g=reading.accel_g, mag_raw=reading.mag_raw, dt=step_dt
+        )
+        elapsed += step_dt
+        for cp in checkpoints:
+            if checkpoints[cp] is None and elapsed >= cp:
+                checkpoints[cp] = result.euler.roll_deg
+
+    assert abs(checkpoints[1.0]) < 2.0  # still in the 0deg window
+    assert abs(checkpoints[3.0] - 10.0) < 2.0  # deep in the +10deg window
+    assert abs(checkpoints[6.0]) < 2.0  # back to 0deg after the step ends
+
+
+def test_pipeline_survives_sensor_nan_scenario_and_keeps_finite_attitude() -> None:
+    """inject_nan must never corrupt the fused attitude: MahonyMARG.update()
+    fails closed and holds the last good (finite) quaternion/euler, even
+    though the raw accel/gyro pass-through legitimately shows NaN for the
+    duration of the (simulated) fault."""
+
+    def scenario(elapsed: float) -> ScenarioSample:
+        roll_deg = 12.0 * sin(elapsed * 0.85)
+        return ScenarioSample(
+            roll_deg=roll_deg, pitch_deg=0.0, yaw_deg=0.0, inject_nan=(elapsed >= 0.05)
+        )
+
+    source = EmulatedImuSource(scenario=scenario)
+    pipeline = ImuPipeline(
+        source=source,
+        sample_rate_hz=200.0,
+        mag_rate_hz=200.0,
+        kp=0.8,
+        ki=0.02,
+        calibration=ImuCalibration(),
+        max_mag_samples=10,
+    )
+    pipeline.start()
+    try:
+        time.sleep(0.2)  # well past the 0.05s NaN-injection onset
+        snapshot = pipeline.shared.snapshot()
+        alive = pipeline.is_alive()
+    finally:
+        pipeline.stop(timeout=2.0)
+
+    assert alive  # the pipeline thread must never die from a NaN sample
+    assert snapshot is not None
+    assert snapshot.sample_count > 0
+    assert isfinite(snapshot.euler.roll_deg)
+    assert isfinite(snapshot.euler.pitch_deg)
+    assert isfinite(snapshot.quaternion.w)
+    assert isfinite(snapshot.quaternion.x)
+    assert isfinite(snapshot.quaternion.y)
+    assert isfinite(snapshot.quaternion.z)
+    assert pipeline.error is None  # NaN input is skipped, not treated as a cycle failure
+
+
+def test_pipeline_hold_stale_freezes_timestamp_but_thread_stays_alive() -> None:
+    """hold_stale must make ``AttitudeState.timestamp`` genuinely stop
+    advancing (the mechanism stabilization.py's staleness check keys on),
+    while the pipeline thread keeps running rather than dying or hanging."""
+
+    def scenario(elapsed: float) -> ScenarioSample:
+        return ScenarioSample(
+            roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0, hold_stale=(elapsed >= 0.05)
+        )
+
+    source = EmulatedImuSource(scenario=scenario)
+    pipeline = ImuPipeline(
+        source=source,
+        sample_rate_hz=200.0,
+        mag_rate_hz=200.0,
+        kp=0.8,
+        ki=0.02,
+        calibration=ImuCalibration(),
+        max_mag_samples=10,
+    )
+    # The read() raise (see EmulatedImuSource docstring) is logged every cycle
+    # once hold_stale is permanent; silence it so the test output isn't spammed
+    # with expected tracebacks.
+    logging.disable(logging.CRITICAL)
+    try:
+        pipeline.start()
+        time.sleep(0.15)  # well past the 0.05s stale onset
+        snapshot_a = pipeline.shared.snapshot()
+        alive_mid = pipeline.is_alive()
+        time.sleep(0.2)
+        snapshot_b = pipeline.shared.snapshot()
+        alive_end = pipeline.is_alive()
+        pipeline.stop(timeout=2.0)
+    finally:
+        logging.disable(logging.NOTSET)
+
+    assert snapshot_a is not None and snapshot_b is not None
+    assert snapshot_a.timestamp == snapshot_b.timestamp  # no new sample was ever published
+    assert alive_mid and alive_end  # thread survives a permanently failing source
+    assert pipeline.error is not None
