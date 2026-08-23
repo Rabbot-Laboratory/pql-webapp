@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from time import sleep
 
 
 def _sign_extend(value: int, bits: int) -> int:
@@ -115,6 +116,7 @@ class Bmx055Reader:
         # those decimated reads with fresh samples.
         # 0x4B (power control) = 0x01 -> power on (leave suspend mode).
         self._write_byte(self.mag_address, 0x4B, 0x01)
+        sleep(0.003)
         # 0x4C (op mode / ODR) = 0x38 -> data rate 30 Hz, opmode = normal.
         # bits[5:3]=111 (30 Hz), bits[2:1]=00 (normal). 30 Hz comfortably feeds a
         # ~20 Hz magnetometer read cadence.

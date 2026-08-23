@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import highend_server.sensors.imu_bmx055 as imu_bmx055
 from highend_server.sensors.imu_bmx055 import Bmx055Reader
 
 
@@ -24,7 +25,9 @@ def _reader_with_blocks(blocks: dict[tuple[int, int], list[int]]) -> Bmx055Reade
     return reader
 
 
-def test_initialization_writes_expected_registers() -> None:
+def test_initialization_writes_expected_registers(monkeypatch) -> None:
+    delays: list[float] = []
+    monkeypatch.setattr(imu_bmx055, "sleep", delays.append)
     reader = _reader_with_blocks({})
     reader._initialize_accel()
     reader._initialize_gyro()
@@ -40,6 +43,7 @@ def test_initialization_writes_expected_registers() -> None:
     # Mag: power on (0x01) and 30 Hz normal mode (0x38).
     assert (0x10, 0x4B, 0x01) in writes
     assert (0x10, 0x4C, 0x38) in writes
+    assert delays == [0.003]
 
 
 def test_read_scales_and_sign_extends() -> None:
