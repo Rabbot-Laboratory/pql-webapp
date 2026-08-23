@@ -534,6 +534,31 @@ class StabilizationRequest(BaseModel):
     gains: StabilizationGains | None = None
 
 
+class StandingPhase(str, Enum):
+    OFF = "off"
+    RISING = "rising"
+    HOLDING = "holding"
+
+
+class StandingRequest(BaseModel):
+    enabled: bool
+    safety_confirmed: bool = False
+
+
+class StandingState(BaseModel):
+    enabled: bool = False
+    phase: StandingPhase = StandingPhase.OFF
+    standing_ok: bool = False
+    walk_gate_enabled: bool = True
+    auto_disabled: bool = False
+    disabled_reason: str | None = None
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
+    axis_errors: list[int] = Field(default_factory=list)
+    overdrive_active: list[bool] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class AdaptiveWalkMode(str, Enum):
     ADAPTIVE = "adaptive"
     # Pure nominal-trajectory replay (rate limit only): the baseline

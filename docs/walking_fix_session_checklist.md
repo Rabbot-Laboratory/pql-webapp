@@ -19,6 +19,13 @@ python scripts/robotctl.py characterize --axis 0 --amplitude 300
 - [ ] axis 0〜7 実行 → `config/axis_characterization.json` 生成
 - [ ] 表示された dead time / t63 / 速度の伸縮非対称をメモ（→ CSV軸別先行の再調整と `config/pneumatic_sim.json` 同定の入力）
 
+## 2.5 立位保持（歩行の前提。フロー: 起動→較正→立つ→歩行）
+- [ ] Motionタブ最上部「安全に立つ」: 安全確認チェック→「立ち上がる」
+- [ ] Home姿勢へ上昇→保持→**立位OK**バッジ（全軸誤差≤200・傾斜≤5°が2秒継続）を確認
+- [ ] 軸別誤差チップを観察: 赤=オーバードライブ補正中（不感帯突破動作）。特定軸が赤のまま張り付くならその軸のゲイン/機構を疑う
+- [ ] 立位OKが出ない場合: `.env` の `HIGHEND_STANDING_HOLD_TOLERANCE` / `HIGHEND_STANDING_OVERDRIVE_GAIN` を調整（検証だけしたい時は `HIGHEND_ADAPTIVE_WALK_REQUIRE_STANDING=0` で歩行ゲート解除）
+- 歩行ボタンは**立位OKの間だけ**有効。歩行開始で立位保持は自動解除（ハンドオーバー）
+
 ## 3. ベースライン計測 — v2 CSVの素の実力（未取得のまま）
 - [ ] Motionタブ: モード=**素再生**、サイクル=**1周期** → 長押し（自動停止・自動記録）
 - [ ] `python scripts/walk_metrics.py metrics Logs/experiments/<ID>` — 軸別遅れ・飽和率・後脚キック同期ずれを確認

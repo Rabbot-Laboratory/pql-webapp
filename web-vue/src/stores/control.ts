@@ -21,6 +21,7 @@ import {
   fetchLegPreviews,
   fetchSensors,
   fetchStabilization,
+  fetchStanding,
   fetchTelemetryRecordingStatus,
   fetchMotionFile,
   fetchMotionLibrary,
@@ -43,6 +44,7 @@ import {
   stopTelemetryRecording,
   stopCsvPlayback,
   updateStabilization,
+  updateStanding,
 } from '@/services/controlApi';
 import type {
   AdaptiveWalkMode,
@@ -67,6 +69,7 @@ import type {
   SensorState,
   StabilizationGains,
   StabilizationState,
+  StandingState,
   SystemStatus,
   TelemetryEvent,
   TelemetryRecordingScope,
@@ -131,6 +134,7 @@ export const useControlStore = defineStore('control', () => {
   const experimentRunning = ref<ExperimentManifest | null>(null);
   const lastExperimentSummary = ref<ExperimentSummary | null>(null);
   const stabilization = ref<StabilizationState | null>(null);
+  const standing = ref<StandingState | null>(null);
   const adaptiveWalk = ref<AdaptiveWalkState | null>(null);
   const telemetryRecording = ref<TelemetryRecordingStatus>({
     is_recording: false,
@@ -305,6 +309,7 @@ export const useControlStore = defineStore('control', () => {
         legs?: LegPreview[];
         sensors?: SensorState;
         stabilization?: StabilizationState;
+        standing?: StandingState;
         adaptive_walk?: AdaptiveWalkState;
         gamepad?: GamepadState;
         hardware?: HardwareStatus;
@@ -317,6 +322,7 @@ export const useControlStore = defineStore('control', () => {
       system.value = payload.system;
       sensors.value = payload.sensors ?? null;
       stabilization.value = payload.stabilization ?? null;
+      standing.value = payload.standing ?? null;
       adaptiveWalk.value = payload.adaptive_walk ?? null;
       gamepad.value = payload.gamepad ?? null;
       hardware.value = payload.hardware ?? null;
@@ -408,6 +414,14 @@ export const useControlStore = defineStore('control', () => {
       return;
     }
 
+    if (event.type === 'standing_state') {
+      const standingPayload = (event.payload as { standing?: StandingState } | null)?.standing;
+      if (standingPayload) {
+        standing.value = standingPayload;
+      }
+      return;
+    }
+
     if (event.type === 'adaptive_walk_state') {
       const walkingPayload = (event.payload as { adaptive_walk?: AdaptiveWalkState } | null)?.adaptive_walk;
       if (walkingPayload) {
@@ -433,7 +447,7 @@ export const useControlStore = defineStore('control', () => {
   async function refresh(): Promise<void> {
     loading.value = true;
     try {
-      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot, stabilizationSnapshot, adaptiveWalkSnapshot, gamepadSnapshot, hardwareSnapshot] =
+      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot, stabilizationSnapshot, adaptiveWalkSnapshot, standingSnapshot, gamepadSnapshot, hardwareSnapshot] =
         await Promise.all([
           fetchHealth(),
           fetchActuators(),
@@ -443,6 +457,7 @@ export const useControlStore = defineStore('control', () => {
           fetchSensors(),
           fetchStabilization(),
           fetchAdaptiveWalk(),
+          fetchStanding(),
           fetchGamepad(),
           fetchHardwareStatus(),
         ]);
@@ -454,6 +469,7 @@ export const useControlStore = defineStore('control', () => {
       sensors.value = sensorSnapshot.item;
       stabilization.value = stabilizationSnapshot;
       adaptiveWalk.value = adaptiveWalkSnapshot;
+      standing.value = standingSnapshot;
       gamepad.value = gamepadSnapshot.item;
       hardware.value = hardwareSnapshot.item;
       telemetryRecording.value = recordingStatus;
@@ -636,6 +652,13 @@ export const useControlStore = defineStore('control', () => {
       safety_confirmed: safetyConfirmed,
       cycles: options?.cycles ?? null,
       mode: options?.mode ?? 'adaptive',
+    });
+  }
+
+  async function setStandingEnabled(enabled: boolean, safetyConfirmed = false): Promise<void> {
+    standing.value = await updateStanding({
+      enabled,
+      safety_confirmed: safetyConfirmed,
     });
   }
 
@@ -844,6 +867,8 @@ export const useControlStore = defineStore('control', () => {
     moveHome,
     sensors,
     setForwardPressed,
+    setStandingEnabled,
+    standing,
     setStabilizationEnabled,
     stabilization,
     startMagCalibration,

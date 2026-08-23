@@ -28,6 +28,7 @@ from highend_server.application.pql_a00_kinematics import (
     ACTUATOR_HEIGHT_EFFECTS,
     model_derived_mixing_matrix,
 )
+from highend_server.application.standing import StandingController
 from highend_server.config import Settings
 from highend_server.domain.models import (
     POSITION_MAX,
@@ -276,6 +277,7 @@ class AdaptiveWalkingController:
         stabilization_engaged: Callable[[], bool],
         contact_provider: ContactProvider | None = None,
         experiment_recorder: ExperimentRecorder | None = None,
+        standing_controller: StandingController | None = None,
         time_fn: Callable[[], float] = monotonic,
     ) -> None:
         self.settings = settings
@@ -286,6 +288,7 @@ class AdaptiveWalkingController:
         self._stabilization_engaged = stabilization_engaged
         self._contact_provider = contact_provider
         self._recorder = experiment_recorder
+        self._standing = standing_controller
         self._time_fn = time_fn
         self._attitude_frame = AttitudeControlFrame(
             roll_sign=settings.stabilization_roll_sign,
@@ -432,6 +435,14 @@ class AdaptiveWalkingController:
         ):
             raise RuntimeError("robot tilt exceeds adaptive walking start limit")
 
+        if self.settings.adaptive_walk_require_standing and (
+            self._standing is None or not self._standing.standing_ok
+        ):
+            raise RuntimeError(
+                "standing hold must report OK before walking "
+                "(enable standing, or set HIGHEND_ADAPTIVE_WALK_REQUIRE_STANDING=0)"
+            )
+
         motion_name = self.settings.adaptive_walk_motion_name
         detail = self._control.get_motion_file(MotionCategory.FIXED, motion_name)
         rows = tuple(
@@ -443,6 +454,10 @@ class AdaptiveWalkingController:
                 f"fixed motion '{motion_name}' must contain all actuator targets"
             )
 
+        if self._standing is not None and self._standing.enabled:
+            # Standing owns the position targets while holding; hand them over
+            # without moving so the walk starts from the held stand pose.
+            await self._standing.release_for_handover()
         await self._control.claim_adaptive_walking()
         self._rows = rows
         self._interval_s = detail.item.interval_sec or 0.03

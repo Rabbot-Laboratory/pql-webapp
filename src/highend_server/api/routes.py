@@ -11,6 +11,7 @@ from highend_server.api.dependencies import (
     get_hardware_status_service,
     get_sensor_service,
     get_stabilization_controller,
+    get_standing_controller,
 )
 from highend_server.application.adaptive_walking import AdaptiveWalkingController
 from highend_server.application.control_service import ControlService
@@ -21,6 +22,7 @@ from highend_server.application.experiment import (
 )
 from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
+from highend_server.application.standing import StandingController
 from highend_server.domain.models import (
     AdaptiveWalkRequest,
     AdaptiveWalkState,
@@ -43,6 +45,8 @@ from highend_server.domain.models import (
     SetTargetRequest,
     StabilizationRequest,
     StabilizationState,
+    StandingRequest,
+    StandingState,
     StartTelemetryRecordingRequest,
     TelemetryRecordingStatus,
     WebGamepadUpdate,
@@ -237,7 +241,42 @@ async def set_stabilization(
             status_code=409,
             detail="adaptive walking active — release Forward before standalone stabilization",
         )
+    standing = getattr(http_request.app.state, "standing_controller", None)
+    if request.enabled is True and standing is not None and standing.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="standing hold active — disable standing before standalone stabilization",
+        )
     return await controller.apply_request(request)
+
+
+@router.get("/control/standing", response_model=StandingState)
+async def get_standing(
+    controller: StandingController = Depends(get_standing_controller),
+) -> StandingState:
+    return controller.get_state()
+
+
+@router.post("/control/standing", response_model=StandingState)
+async def set_standing(
+    request: StandingRequest,
+    http_request: Request,
+    controller: StandingController = Depends(get_standing_controller),
+) -> StandingState:
+    walking = getattr(http_request.app.state, "adaptive_walking_controller", None)
+    if request.enabled and walking is not None and walking.active:
+        raise HTTPException(
+            status_code=409,
+            detail="adaptive walking active — release Forward before standing",
+        )
+    try:
+        return await controller.set_enabled(
+            request.enabled, safety_confirmed=request.safety_confirmed
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get("/control/adaptive-walk", response_model=AdaptiveWalkState)
@@ -268,6 +307,7 @@ async def set_adaptive_walk_forward(
 @router.post("/control/home")
 async def move_to_home(
     request: HomePoseRequest,
+    http_request: Request,
     service: ControlService = Depends(get_control_service),
     stabilization: StabilizationController = Depends(get_stabilization_controller),
 ) -> dict:
@@ -275,6 +315,9 @@ async def move_to_home(
         raise HTTPException(status_code=400, detail="safety confirmation is required")
     if stabilization.enabled or stabilization.active:
         raise HTTPException(status_code=409, detail="disable stabilization before Home")
+    standing = getattr(http_request.app.state, "standing_controller", None)
+    if standing is not None and standing.enabled:
+        raise HTTPException(status_code=409, detail="disable standing before Home")
     try:
         await service.start_home_motion()
     except (ValueError, FileNotFoundError) as error:
@@ -546,6 +589,9 @@ async def websocket_stream(websocket: WebSocket) -> None:
     adaptive_walking_controller: AdaptiveWalkingController | None = getattr(
         websocket.app.state, "adaptive_walking_controller", None
     )
+    standing_controller: StandingController | None = getattr(
+        websocket.app.state, "standing_controller", None
+    )
     await manager.connect(websocket)
     try:
         await websocket.send_json(
@@ -569,6 +615,11 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     "adaptive_walk": (
                         adaptive_walking_controller.get_state().model_dump(mode="json")
                         if adaptive_walking_controller is not None
+                        else None
+                    ),
+                    "standing": (
+                        standing_controller.get_state().model_dump(mode="json")
+                        if standing_controller is not None
                         else None
                     ),
                     "gamepad": (

@@ -5,6 +5,7 @@ from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
+from highend_server.application.standing import StandingController
 from highend_server.config import Settings
 from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
@@ -36,6 +37,10 @@ def get_stabilization_controller(request: Request) -> StabilizationController:
 
 def get_adaptive_walking_controller(request: Request) -> AdaptiveWalkingController:
     return request.app.state.adaptive_walking_controller
+
+
+def get_standing_controller(request: Request) -> StandingController:
+    return request.app.state.standing_controller
 
 
 def get_experiment_recorder(request: Request) -> ExperimentRecorder:

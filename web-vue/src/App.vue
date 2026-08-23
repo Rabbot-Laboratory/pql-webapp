@@ -23,6 +23,7 @@ import HardwareNotice from '@/components/HardwareNotice.vue';
 import MotionControlPanel from '@/components/MotionControlPanel.vue';
 import SensorCalibrationPanel from '@/components/SensorCalibrationPanel.vue';
 import StabilizationPanel from '@/components/StabilizationPanel.vue';
+import StandingPanel from '@/components/StandingPanel.vue';
 import StatusToolbar from '@/components/StatusToolbar.vue';
 import { useControlStore } from '@/stores/control';
 import type {
@@ -619,6 +620,9 @@ onBeforeUnmount(() => {
           </TabPanel>
 
           <TabPanel value="motion" class="flex-1 overflow-auto">
+            <section v-if="store.activeTab === 'motion'" class="motion-extras standing-section">
+              <StandingPanel />
+            </section>
             <MotionControlPanel />
             <section v-if="store.activeTab === 'motion'" class="motion-extras">
               <GaitDiagramPanel />

@@ -113,12 +113,16 @@ const canUseFreeMode = computed(() => actuatorOrder.value.length > 0 && airOffCo
 const imuReady = computed(
   () => store.sensors?.imu.connection_state === 'connected' && store.sensors.imu.orientation !== null,
 );
+const standingGateOpen = computed(
+  () => !store.standing?.walk_gate_enabled || store.standing?.standing_ok === true,
+);
 const canHoldForward = computed(
   () =>
     walkSafetyConfirmed.value &&
     imuReady.value &&
     store.wsState === 'live' &&
     !store.stabilization?.enabled &&
+    standingGateOpen.value &&
     !forwardBusy.value,
 );
 const walkStatusLabel = computed(() => {
@@ -677,6 +681,11 @@ onBeforeUnmount(() => {
                 v-if="store.adaptiveWalk?.gate_waiting"
                 severity="warn"
                 value="接地ゲート待ち"
+              />
+              <Tag
+                v-if="!standingGateOpen"
+                severity="warn"
+                value="立位OK待ち(上の立位保持を有効化)"
               />
             </div>
             <dl class="adaptive-walk-metrics">

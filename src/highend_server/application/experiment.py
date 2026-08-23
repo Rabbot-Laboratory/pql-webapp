@@ -137,6 +137,7 @@ _TEED_EVENT_TYPES = frozenset(
         "playback_guard",
         "motion_request",
         "stabilization_state",
+        "standing_state",
         "adaptive_walk_state",
         "adaptive_walk_gate",
         "adaptive_walk_ilc",

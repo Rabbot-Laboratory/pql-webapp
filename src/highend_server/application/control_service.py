@@ -158,7 +158,8 @@ class ControlService:
         # Exclusive owner flag for the lease-controlled adaptive walking loop.
         # It prevents manual targets and CSV playback from racing 25 Hz walking
         # target updates on the same pneumatic actuators.
-        self._adaptive_walking_active = False
+        # Exclusive position-target owner: "adaptive walking" / "standing" / None.
+        self._motion_owner: str | None = None
         self._playback_status = PlaybackStatus.IDLE
         self._current_motion_name: str | None = None
         self._current_motion_category: MotionCategory | None = None
@@ -407,8 +408,10 @@ class ControlService:
         self._level_offsets_provider = provider or (lambda: (0.0, 0.0))
 
     async def set_target(self, actuator_id: int, request: SetTargetRequest) -> ActuatorState:
-        if self._adaptive_walking_active:
-            raise RuntimeError("adaptive walking active — release Forward before manual control")
+        if self._motion_owner is not None:
+            raise RuntimeError(
+                f"{self._motion_owner} active — release it before manual control"
+            )
         actuator = self._actuators[actuator_id]
 
         async with self._lock:
@@ -479,8 +482,10 @@ class ControlService:
         await self._emit("motion_request", {"motion": request.motion.value})
 
     async def start_csv_playback(self, request: CsvPlaybackRequest) -> None:
-        if self._adaptive_walking_active:
-            raise RuntimeError("adaptive walking active — release Forward before CSV playback")
+        if self._motion_owner is not None:
+            raise RuntimeError(
+                f"{self._motion_owner} active — release it before CSV playback"
+            )
         await self.stop_csv_playback()
         self._playback_status = PlaybackStatus.RUNNING
         self._current_motion_name = request.motion_name
@@ -522,18 +527,18 @@ class ControlService:
             )
         )
 
-    async def claim_adaptive_walking(self) -> None:
-        """Give the adaptive walking loop exclusive ownership of position targets."""
+    async def claim_adaptive_walking(self, owner: str = "adaptive walking") -> None:
+        """Give a controller loop exclusive ownership of position targets."""
         await self.stop_csv_playback()
         async with self._lock:
-            if self._adaptive_walking_active:
-                raise RuntimeError("adaptive walking is already active")
-            self._adaptive_walking_active = True
+            if self._motion_owner is not None:
+                raise RuntimeError(f"{self._motion_owner} is already active")
+            self._motion_owner = owner
 
     async def release_adaptive_walking(self) -> None:
-        """Release walking ownership while holding the last commanded posture."""
+        """Release target ownership while holding the last commanded posture."""
         async with self._lock:
-            self._adaptive_walking_active = False
+            self._motion_owner = None
 
     async def apply_adaptive_walking_targets(self, targets: list[int]) -> None:
         """Atomically send one rate-limited walking target vector to both ESP32s."""
@@ -541,8 +546,8 @@ class ControlService:
             raise ValueError("adaptive walking target count must match actuator_count")
         per_port_fields: dict[PortRole, list[int]] = {}
         async with self._lock:
-            if not self._adaptive_walking_active:
-                raise RuntimeError("adaptive walking target ownership is not active")
+            if self._motion_owner is None:
+                raise RuntimeError("motion target ownership is not active")
             for index, value in enumerate(targets):
                 clamped = max(POSITION_MIN, min(POSITION_MAX, int(value)))
                 self._commit_base_position_locked(self._actuators[index], clamped)

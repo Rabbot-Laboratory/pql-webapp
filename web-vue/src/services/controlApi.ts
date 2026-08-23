@@ -18,6 +18,7 @@ import type {
   SensorState,
   StabilizationGains,
   StabilizationState,
+  StandingState,
   TelemetryRecordingScope,
   TelemetryRecordingStatus,
   TelemetryEvent,
@@ -101,6 +102,21 @@ export async function cancelMagCalibration(): Promise<{ item: SensorState }> {
 
 export async function fetchStabilization(): Promise<StabilizationState> {
   return readJson<StabilizationState>('/api/control/stabilization');
+}
+
+export async function fetchStanding(): Promise<StandingState> {
+  return readJson<StandingState>('/api/control/standing');
+}
+
+export async function updateStanding(payload: {
+  enabled: boolean;
+  safety_confirmed?: boolean;
+}): Promise<StandingState> {
+  return readJson<StandingState>('/api/control/standing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchAdaptiveWalk(): Promise<AdaptiveWalkState> {

@@ -23,6 +23,7 @@ from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
+from highend_server.application.standing import StandingController
 from highend_server.config import Settings
 from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
@@ -38,6 +39,7 @@ def _make_settings(tmp_path: Path, *, emulate_devices: bool) -> Settings:
     return Settings(
         emulate_devices=emulate_devices,
         sensors_enabled=False,
+        adaptive_walk_require_standing=False,
         sensor_config_dir_name=str(tmp_path / "config"),
         telemetry_log_root_dir=str(tmp_path / "Logs"),
         sensor_publish_interval_sec=0.02,
@@ -71,6 +73,14 @@ def _make_app(settings: Settings) -> FastAPI:
         event_sink=event_sink,
     )
     experiment_recorder = ExperimentRecorder(settings=settings)
+    standing_controller = StandingController(
+        settings=settings,
+        control_service=control_service,
+        attitude_provider=sensor_service.latest_attitude,
+        level_offsets_provider=sensor_service.level_offsets,
+        event_sink=event_sink,
+        stabilization_engaged=lambda: stabilization_controller.enabled,
+    )
     adaptive_walking_controller = AdaptiveWalkingController(
         settings=settings,
         control_service=control_service,
@@ -80,6 +90,7 @@ def _make_app(settings: Settings) -> FastAPI:
         stabilization_engaged=lambda: stabilization_controller.enabled,
         contact_provider=sensor_service.latest_contact,
         experiment_recorder=experiment_recorder,
+        standing_controller=standing_controller,
     )
     experiment_recorder.bind(
         control_service=control_service,
@@ -95,12 +106,14 @@ def _make_app(settings: Settings) -> FastAPI:
         await gamepad_service.start()
         await hardware_status_service.start()
         await stabilization_controller.start()
+        await standing_controller.start()
         await adaptive_walking_controller.start()
         try:
             yield
         finally:
             await experiment_recorder.shutdown()
             await adaptive_walking_controller.stop()
+            await standing_controller.stop()
             await stabilization_controller.stop()
             await gamepad_service.stop()
             await hardware_status_service.stop()
@@ -114,6 +127,7 @@ def _make_app(settings: Settings) -> FastAPI:
     app.state.gamepad_service = gamepad_service
     app.state.hardware_status_service = hardware_status_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.standing_controller = standing_controller
     app.state.adaptive_walking_controller = adaptive_walking_controller
     app.state.experiment_recorder = experiment_recorder
     app.include_router(router, prefix="/api")
@@ -364,3 +378,58 @@ def test_adaptive_forward_accepts_cycles_and_mode(client: TestClient) -> None:
         json={"pressed": True, "safety_confirmed": True, "cycles": 99},
     )
     assert invalid.status_code == 422
+
+
+def _write_home_csv(client: TestClient) -> None:
+    fixed_path = client.app.state.settings.fixed_motion_path
+    fixed_path.mkdir(parents=True, exist_ok=True)
+    (fixed_path / "home.csv").write_text(
+        "# interval_sec=0.04\n2048,2048,2048,2048,2048,2048,2048,2048\n",
+        encoding="utf-8",
+    )
+
+
+def test_standing_roundtrip_and_interlocks(client: TestClient) -> None:
+    _write_home_csv(client)
+
+    denied = client.post("/api/control/standing", json={"enabled": True})
+    assert denied.status_code == 400  # safety confirmation required
+
+    started = client.post(
+        "/api/control/standing", json={"enabled": True, "safety_confirmed": True}
+    )
+    assert started.status_code == 200
+    body = started.json()
+    assert body["enabled"] is True
+    assert body["phase"] in ("rising", "holding")
+
+    fetched = client.get("/api/control/standing")
+    assert fetched.status_code == 200
+    assert fetched.json()["enabled"] is True
+
+    # Standing blocks stabilization, Home, and manual targets.
+    stab = client.post("/api/control/stabilization", json={"enabled": True})
+    assert stab.status_code == 409
+    home = client.post("/api/control/home", json={"safety_confirmed": True})
+    assert home.status_code == 409
+    manual = client.post(
+        "/api/actuators/0/target", json={"mode": "position", "value": 2000}
+    )
+    assert manual.status_code == 409
+
+    stopped = client.post("/api/control/standing", json={"enabled": False})
+    assert stopped.status_code == 200
+    assert stopped.json()["enabled"] is False
+
+
+def test_stabilization_blocks_standing(client: TestClient) -> None:
+    _write_home_csv(client)
+    enable = client.post("/api/control/stabilization", json={"enabled": True})
+    assert enable.status_code == 200
+    try:
+        standing = client.post(
+            "/api/control/standing", json={"enabled": True, "safety_confirmed": True}
+        )
+        assert standing.status_code == 409
+    finally:
+        client.post("/api/control/stabilization", json={"enabled": False})

@@ -139,6 +139,7 @@ async def _lease_expiry_scenario(tmp_path: Path) -> None:
         emulate_devices=True,
         motion_root_dir=str(motion_root),
         adaptive_walk_lease_timeout_sec=0.4,
+        adaptive_walk_require_standing=False,
         stabilization_roll_sign=1,
         stabilization_pitch_sign=1,
     )
@@ -351,6 +352,7 @@ def _make_walk_controller(
     recorder=None,
     **settings_overrides,
 ):
+    settings_overrides.setdefault("adaptive_walk_require_standing", False)
     settings = Settings(
         emulate_devices=True,
         motion_root_dir=str(_write_walk_motion(tmp_path)),
@@ -635,6 +637,44 @@ async def _motion_name_scenario(tmp_path: Path) -> None:
         state = await controller.set_forward_pressed(True, safety_confirmed=True)
         assert state.active is True
         assert controller._interval_s == pytest.approx(0.05)
+    finally:
+        await controller.release()
+        await control.shutdown()
+
+
+class _FakeStanding:
+    def __init__(self, *, ok: bool, enabled: bool = True) -> None:
+        self.standing_ok = ok
+        self.enabled = enabled
+        self.handovers = 0
+
+    async def release_for_handover(self) -> None:
+        self.handovers += 1
+        self.enabled = False
+        self.standing_ok = False
+
+
+def test_walk_requires_standing_ok_when_gated(tmp_path: Path) -> None:
+    asyncio.run(_standing_gate_scenario(tmp_path))
+
+
+async def _standing_gate_scenario(tmp_path: Path) -> None:
+    standing = _FakeStanding(ok=False)
+    controller, control, _clock, _events = _make_walk_controller(
+        tmp_path, adaptive_walk_require_standing=True
+    )
+    controller._standing = standing
+    await control.connect()
+    try:
+        with pytest.raises(RuntimeError, match="standing hold must report OK"):
+            await controller.set_forward_pressed(True, safety_confirmed=True)
+
+        standing.standing_ok = True
+        state = await controller.set_forward_pressed(True, safety_confirmed=True)
+        assert state.active is True
+        # The stand-hold handed its target ownership to the walk.
+        assert standing.handovers == 1
+        assert standing.enabled is False
     finally:
         await controller.release()
         await control.shutdown()

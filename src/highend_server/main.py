@@ -13,6 +13,7 @@ from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import ExperimentRecorder
 from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
+from highend_server.application.standing import StandingController
 from highend_server.config import get_settings
 from highend_server.domain.models import TelemetryEvent
 from highend_server.input.gamepad_service import GamepadService
@@ -31,12 +32,14 @@ async def lifespan(app: FastAPI):
     await app.state.hardware_status_service.start()
     await app.state.gamepad_service.start()
     await app.state.stabilization_controller.start()
+    await app.state.standing_controller.start()
     await app.state.adaptive_walking_controller.start()
     try:
         yield
     finally:
         await app.state.experiment_recorder.shutdown()
         await app.state.adaptive_walking_controller.stop()
+        await app.state.standing_controller.stop()
         await app.state.stabilization_controller.stop()
         await app.state.gamepad_service.stop()
         await app.state.hardware_status_service.stop()
@@ -78,6 +81,14 @@ def create_app() -> FastAPI:
         event_sink=event_sink,
         calibration_lock=sensor_service.calibration_lock,
     )
+    standing_controller = StandingController(
+        settings=settings,
+        control_service=control_service,
+        attitude_provider=sensor_service.latest_attitude,
+        level_offsets_provider=sensor_service.level_offsets,
+        event_sink=event_sink,
+        stabilization_engaged=lambda: stabilization_controller.enabled,
+    )
     adaptive_walking_controller = AdaptiveWalkingController(
         settings=settings,
         control_service=control_service,
@@ -87,6 +98,7 @@ def create_app() -> FastAPI:
         stabilization_engaged=lambda: stabilization_controller.enabled,
         contact_provider=sensor_service.latest_contact,
         experiment_recorder=experiment_recorder,
+        standing_controller=standing_controller,
     )
     experiment_recorder.bind(
         control_service=control_service,
@@ -97,7 +109,9 @@ def create_app() -> FastAPI:
     # Authoritative (in-lock) side of the "no calibration while stabilization
     # is engaged" invariant; the route-level 409 pre-check alone is racy.
     sensor_service.set_stabilization_guard(
-        lambda: stabilization_controller.enabled or adaptive_walking_controller.active
+        lambda: stabilization_controller.enabled
+        or adaptive_walking_controller.active
+        or standing_controller.enabled
     )
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -116,6 +130,7 @@ def create_app() -> FastAPI:
     app.state.gamepad_service = gamepad_service
     app.state.hardware_status_service = hardware_status_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.standing_controller = standing_controller
     app.state.adaptive_walking_controller = adaptive_walking_controller
     app.state.experiment_recorder = experiment_recorder
 

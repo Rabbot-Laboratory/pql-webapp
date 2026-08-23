@@ -196,6 +196,22 @@ export interface GamepadState {
   updated_at: string;
 }
 
+export type StandingPhase = 'off' | 'rising' | 'holding';
+
+export interface StandingState {
+  enabled: boolean;
+  phase: StandingPhase;
+  standing_ok: boolean;
+  walk_gate_enabled: boolean;
+  auto_disabled: boolean;
+  disabled_reason: string | null;
+  roll_deg: number;
+  pitch_deg: number;
+  axis_errors: number[];
+  overdrive_active: boolean[];
+  updated_at: string;
+}
+
 export type AdaptiveWalkMode = 'adaptive' | 'replay';
 
 export interface AdaptiveWalkState {

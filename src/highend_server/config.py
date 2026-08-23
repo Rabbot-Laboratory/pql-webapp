@@ -148,6 +148,30 @@ class Settings(BaseSettings):
         "error_difference"
     )
 
+    # --- Standing hold (rise to the home pose, then actively keep it) -------
+    standing_rate_hz: float = Field(default=25.0, gt=0.0, le=100.0)
+    # Rise ramp speed toward the stand pose (same scale as home_motion_rate).
+    standing_rise_rate: float = Field(default=150.0, gt=0.0, le=2000.0)
+    # Per-axis error above which the overdrive kicks in. Sized to the measured
+    # ESP32+valve dead zone (~±300 units at current gains): errors below this
+    # are left alone so the valves rest instead of hunting.
+    standing_hold_tolerance: float = Field(default=150.0, ge=0.0, le=1000.0)
+    # Overdrive: exaggerate the commanded target beyond the stand pose by
+    # gain*error (clamped) so the ESP32 PID output crosses the valve opening
+    # threshold. 2026-08-23 diagnosis: plain targets cannot fix small errors.
+    standing_overdrive_gain: float = Field(default=1.0, ge=0.0, le=5.0)
+    standing_max_overdrive: float = Field(default=400.0, ge=0.0, le=1000.0)
+    standing_max_target_rate: float = Field(default=600.0, gt=0.0, le=5000.0)
+    standing_attitude_kp: float = Field(default=1.5, ge=0.0, le=50.0)
+    standing_attitude_kd: float = Field(default=0.2, ge=0.0, le=50.0)
+    standing_max_attitude_correction: float = Field(default=40.0, ge=0.0, le=500.0)
+    # "Standing OK" (walk-gate) criteria: every axis within tolerance AND the
+    # body level, sustained for the hold time.
+    standing_ok_tolerance: float = Field(default=200.0, gt=0.0, le=1000.0)
+    standing_ok_max_tilt_deg: float = Field(default=5.0, gt=0.0, le=45.0)
+    standing_ok_hold_sec: float = Field(default=2.0, ge=0.0, le=30.0)
+    standing_max_tilt_deg: float = Field(default=15.0, gt=0.0, le=45.0)
+
     # --- Adaptive forward walking (real-hardware conservative defaults) ----
     # The browser renews a short lease while the forward button is held. A lost
     # pointer-up/network/browser closes the lease and stops target updates.
@@ -158,6 +182,9 @@ class Settings(BaseSettings):
         default=0.5, gt=0.0, le=5.0
     )
     adaptive_walk_max_tilt_deg: float = Field(default=12.0, gt=0.0, le=45.0)
+    # Walking may only start while the standing hold reports standing_ok.
+    # Disable for bench tests without the standing phase.
+    adaptive_walk_require_standing: bool = True
     # Fixed Motion CSV played by the walk button (gait_lab candidates:
     # walk_crawl / walk_trot_slow / walk_rabbit_v3 / walk_pronk / walk_bound_lowamp).
     adaptive_walk_motion_name: str = Field(default="rabbit_bound", min_length=1)
