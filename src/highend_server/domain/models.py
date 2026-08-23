@@ -272,10 +272,66 @@ class AdcBankState(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class ContactPolarity(str, Enum):
+    ACTIVE_HIGH = "active_high"
+    ACTIVE_LOW = "active_low"
+
+
+class ContactLegCalibration(BaseModel):
+    leg: LegId
+    channel: int = Field(ge=0, le=7)
+    # Hysteresis pair: supporting turns ON at on_threshold and OFF at
+    # off_threshold.  active_high requires on >= off; active_low the reverse.
+    on_threshold: int = Field(default=2048, ge=0, le=4095)
+    off_threshold: int = Field(default=2048, ge=0, le=4095)
+    polarity: ContactPolarity = ContactPolarity.ACTIVE_HIGH
+
+    @model_validator(mode="after")
+    def _thresholds_consistent(self) -> ContactLegCalibration:
+        if self.polarity is ContactPolarity.ACTIVE_HIGH:
+            if self.on_threshold < self.off_threshold:
+                raise ValueError("active_high requires on_threshold >= off_threshold")
+        elif self.on_threshold > self.off_threshold:
+            raise ValueError("active_low requires on_threshold <= off_threshold")
+        return self
+
+
+def _default_contact_legs() -> list[ContactLegCalibration]:
+    # Provisional CH0-3 wiring map carried over from the display-only panel.
+    # Verify each channel on the real robot before contact is used by control.
+    return [
+        ContactLegCalibration(leg=leg, channel=channel)
+        for channel, leg in enumerate(
+            (LegId.FRONT_RIGHT, LegId.FRONT_LEFT, LegId.REAR_RIGHT, LegId.REAR_LEFT)
+        )
+    ]
+
+
+class ContactCalibration(BaseModel):
+    device: int = 0
+    debounce_ticks: int = Field(default=2, ge=1, le=50)
+    legs: list[ContactLegCalibration] = Field(default_factory=_default_contact_legs)
+
+    @model_validator(mode="after")
+    def _one_entry_per_leg(self) -> ContactCalibration:
+        legs = [item.leg for item in self.legs]
+        if sorted(legs) != sorted(LegId):
+            raise ValueError("calibration must contain exactly one entry per leg")
+        return self
+
+
+class ContactLegState(BaseModel):
+    leg: LegId
+    raw: int | None = None
+    voltage: float | None = None
+    supporting: bool = False
+
+
 class SensorState(BaseModel):
     enabled: bool = False
     imu: Bmx055State = Field(default_factory=Bmx055State)
     adc_banks: list[AdcBankState] = Field(default_factory=list)
+    contact: list[ContactLegState] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
@@ -478,9 +534,21 @@ class StabilizationRequest(BaseModel):
     gains: StabilizationGains | None = None
 
 
+class AdaptiveWalkMode(str, Enum):
+    ADAPTIVE = "adaptive"
+    # Pure nominal-trajectory replay (rate limit only): the baseline
+    # measurement mode for "run exactly one cycle with adaptation off".
+    REPLAY = "replay"
+
+
 class AdaptiveWalkRequest(BaseModel):
     pressed: bool
     safety_confirmed: bool = False
+    # When set, the walk auto-stops (and auto-records an experiment) after
+    # this many full-amplitude gait cycles. Cycles start counting after the
+    # amplitude ramp completes.
+    cycles: int | None = Field(default=None, ge=1, le=10)
+    mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE
 
 
 class HomePoseRequest(BaseModel):
@@ -500,6 +568,12 @@ class AdaptiveWalkState(BaseModel):
     roll_trim: float = 0.0
     pitch_trim: float = 0.0
     learned_phase_lead_s: list[float] = Field(default_factory=list)
+    mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE
+    cycle_count: int = 0
+    target_cycles: int | None = None
+    gate_waiting: bool = False
+    saturated_axes: list[bool] = Field(default_factory=list)
+    rate_limited_axes: list[bool] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
 
 

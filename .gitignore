@@ -56,6 +56,7 @@ Thumbs.db
 # Secrets / local config
 *.local.json
 config/imu_calibration.json
+config/contact_calibration.json
 .claude/
 .highend_windows_ports.json
 .git.broken-*/

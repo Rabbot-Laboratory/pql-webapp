@@ -39,6 +39,7 @@ def _make_settings(tmp_path: Path, *, emulate_devices: bool) -> Settings:
         emulate_devices=emulate_devices,
         sensors_enabled=False,
         sensor_config_dir_name=str(tmp_path / "config"),
+        telemetry_log_root_dir=str(tmp_path / "Logs"),
         sensor_publish_interval_sec=0.02,
         imu_sample_rate_hz=200.0,
         stabilization_rate_hz=50.0,
@@ -69,6 +70,7 @@ def _make_app(settings: Settings) -> FastAPI:
         level_offsets_provider=sensor_service.level_offsets,
         event_sink=event_sink,
     )
+    experiment_recorder = ExperimentRecorder(settings=settings)
     adaptive_walking_controller = AdaptiveWalkingController(
         settings=settings,
         control_service=control_service,
@@ -76,12 +78,14 @@ def _make_app(settings: Settings) -> FastAPI:
         level_offsets_provider=sensor_service.level_offsets,
         event_sink=event_sink,
         stabilization_engaged=lambda: stabilization_controller.enabled,
+        contact_provider=sensor_service.latest_contact,
+        experiment_recorder=experiment_recorder,
     )
-    experiment_recorder = ExperimentRecorder(settings=settings)
     experiment_recorder.bind(
         control_service=control_service,
         stabilization_controller=stabilization_controller,
         sensor_service=sensor_service,
+        adaptive_walking=adaptive_walking_controller,
     )
 
     @asynccontextmanager
@@ -284,3 +288,79 @@ def test_mag_calibration_conflict_when_sensors_disabled(
 ) -> None:
     start = client_without_sensors.post("/api/sensors/imu/calibration/mag/start")
     assert start.status_code == 409
+
+
+def test_contact_calibration_roundtrip(client: TestClient) -> None:
+    initial = client.get("/api/sensors/contact-calibration")
+    assert initial.status_code == 200
+    calibration = initial.json()["item"]
+    assert {leg["leg"] for leg in calibration["legs"]} == {
+        "front_right",
+        "front_left",
+        "rear_right",
+        "rear_left",
+    }
+
+    for leg in calibration["legs"]:
+        leg["on_threshold"] = 2500
+        leg["off_threshold"] = 2100
+    calibration["debounce_ticks"] = 3
+    update = client.put("/api/sensors/contact-calibration", json=calibration)
+    assert update.status_code == 200
+    assert len(update.json()["item"]["contact"]) == 4
+
+    persisted = client.get("/api/sensors/contact-calibration").json()["item"]
+    assert persisted["debounce_ticks"] == 3
+    assert all(leg["on_threshold"] == 2500 for leg in persisted["legs"])
+
+
+def test_contact_calibration_rejects_inconsistent_thresholds(client: TestClient) -> None:
+    calibration = client.get("/api/sensors/contact-calibration").json()["item"]
+    calibration["legs"][0]["on_threshold"] = 100
+    calibration["legs"][0]["off_threshold"] = 3000
+    response = client.put("/api/sensors/contact-calibration", json=calibration)
+    assert response.status_code == 422
+
+
+def test_sensor_state_includes_contact_legs(client: TestClient) -> None:
+    response = client.get("/api/sensors")
+    assert response.status_code == 200
+    contact = response.json()["item"]["contact"]
+    assert len(contact) == 4
+    assert {entry["leg"] for entry in contact} == {
+        "front_right",
+        "front_left",
+        "rear_right",
+        "rear_left",
+    }
+    assert all(isinstance(entry["supporting"], bool) for entry in contact)
+
+
+def test_adaptive_forward_accepts_cycles_and_mode(client: TestClient) -> None:
+    started = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={
+            "pressed": True,
+            "safety_confirmed": True,
+            "cycles": 3,
+            "mode": "replay",
+        },
+    )
+    assert started.status_code == 200
+    body = started.json()
+    assert body["active"] is True
+    assert body["mode"] == "replay"
+    assert body["target_cycles"] == 3
+    assert body["cycle_count"] == 0
+
+    stopped = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={"pressed": False, "safety_confirmed": False},
+    )
+    assert stopped.status_code == 200
+
+    invalid = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={"pressed": True, "safety_confirmed": True, "cycles": 99},
+    )
+    assert invalid.status_code == 422

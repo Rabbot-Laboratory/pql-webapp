@@ -25,6 +25,7 @@ from highend_server.domain.models import (
     AdaptiveWalkRequest,
     AdaptiveWalkState,
     CaptureRequest,
+    ContactCalibration,
     CsvPlaybackRequest,
     ExperimentManifest,
     ExperimentNoteRequest,
@@ -104,6 +105,26 @@ async def get_hardware_status(
     service: HardwareStatusService = Depends(get_hardware_status_service),
 ) -> dict:
     return {"item": service.state.model_dump(mode="json")}
+
+
+@router.get("/sensors/contact-calibration")
+async def get_contact_calibration(
+    service: SensorService = Depends(get_sensor_service),
+) -> dict:
+    return {"item": service.contact_calibration.model_dump(mode="json")}
+
+
+@router.put("/sensors/contact-calibration")
+async def put_contact_calibration(
+    calibration: ContactCalibration,
+    service: SensorService = Depends(get_sensor_service),
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> dict:
+    state = await service.update_contact_calibration(calibration)
+    recorder.log_action(
+        "contact_calibration", {"calibration": calibration.model_dump(mode="json")}
+    )
+    return {"item": state.model_dump(mode="json")}
 
 
 @router.post("/sensors/imu/calibration/level")
@@ -235,6 +256,8 @@ async def set_adaptive_walk_forward(
         return await controller.set_forward_pressed(
             request.pressed,
             safety_confirmed=request.safety_confirmed,
+            cycles=request.cycles,
+            mode=request.mode,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     adc_vref: float = Field(default=5.0, gt=0.0)
     sensor_config_dir_name: str = "config"
     imu_calibration_file_name: str = "imu_calibration.json"
+    contact_calibration_file_name: str = "contact_calibration.json"
 
     # --- Attitude stabilization (Phase 2 feedback control) -----------------
     # Correction-send / control loop rate. Kept well below the 100 Hz fusion
@@ -174,6 +175,28 @@ class Settings(BaseSettings):
     adaptive_walk_max_trim: float = Field(default=30.0, ge=0.0, le=500.0)
     adaptive_walk_max_attitude_correction: float = Field(default=60.0, ge=0.0, le=500.0)
     adaptive_walk_max_target_rate: float = Field(default=1200.0, gt=0.0, le=5000.0)
+    # --- Contact-aware walking (all off by default: verified-hardware only) --
+    # Master switch: gate gait-phase progression and mask attitude corrections
+    # by the debounced foot-contact states. Enable only after the per-leg
+    # contact calibration has been verified on the real robot.
+    adaptive_walk_use_contact: bool = False
+    # Gait phase (0..1 of the motion CSV cycle) at which the rear-leg kick
+    # starts; phase progression pauses there until both rear legs report
+    # contact (or the timeout elapses). None disables the gate.
+    adaptive_walk_kick_gate_phase: float | None = Field(default=None, ge=0.0, lt=1.0)
+    adaptive_walk_gate_timeout_sec: float = Field(default=0.3, gt=0.0, le=2.0)
+    # End of the rear-leg kick window (for pitch-proportional thrust scaling).
+    adaptive_walk_kick_end_phase: float | None = Field(default=None, gt=0.0, le=1.0)
+    # Raibert-style heuristic: scale the rear-axis kick amplitude by
+    # (1 + gain * pitch_error_deg), clamped to [0.7, 1.3]. Sign and magnitude
+    # must be tuned on hardware; 0 disables.
+    adaptive_walk_pitch_thrust_gain: float = Field(default=0.0, ge=-1.0, le=1.0)
+    # --- Iterative learning control (off by default) ------------------------
+    # Per-cycle feed-forward: previous cycle's per-frame tracking error shapes
+    # the next cycle's nominal waveform. Updates are kept only when the cycle
+    # RMS error improved (see application/ilc.py).
+    adaptive_walk_ilc_gain: float = Field(default=0.0, ge=0.0, le=2.0)
+    adaptive_walk_ilc_max: float = Field(default=100.0, ge=0.0, le=500.0)
     # Header Home button: ramp every axis toward Fixed Motion/home.csv instead
     # of jumping directly to the stored pose.
     home_motion_rate: float = Field(default=150.0, gt=0.0, le=2000.0)
@@ -210,6 +233,10 @@ class Settings(BaseSettings):
     @property
     def imu_calibration_path(self) -> Path:
         return self.sensor_config_path / self.imu_calibration_file_name
+
+    @property
+    def contact_calibration_path(self) -> Path:
+        return self.sensor_config_path / self.contact_calibration_file_name
 
     @property
     def stabilization_config_path(self) -> Path:

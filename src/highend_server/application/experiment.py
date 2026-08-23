@@ -40,17 +40,21 @@ from highend_server.domain.models import (
     ExperimentStartRequest,
     ExperimentStatus,
     ExperimentSummary,
+    LegId,
     TelemetryEvent,
 )
 
 if TYPE_CHECKING:
+    from highend_server.application.adaptive_walking import AdaptiveWalkingController
     from highend_server.application.control_service import ControlSample, ControlService
     from highend_server.application.stabilization import StabilizationController
     from highend_server.sensors.sensor_service import SensorService
 
 logger = logging.getLogger(__name__)
 
-# Exact experiment telemetry CSV header (41 columns, order is load-bearing).
+# Exact experiment telemetry CSV header (order is load-bearing; the original
+# 41 columns stay first so pre-existing analyzers keep working, walk/contact
+# columns are appended after them).
 CSV_HEADER: list[str] = [
     "timestamp",
     "elapsed_ms",
@@ -93,7 +97,36 @@ CSV_HEADER: list[str] = [
     "ki_pitch",
     "kd_pitch",
     "accel_confidence_candidate",
+    # -- adaptive walking (per tick; empty while not walking) ---------------
+    "walk_active",
+    "walk_phase",
+    "walk_cycle",
+    "walk_motion_scale",
+    # -- foot contact (per tick; empty when no ADC data) --------------------
+    "contact_fr_raw",
+    "contact_fr",
+    "contact_fl_raw",
+    "contact_fl",
+    "contact_rr_raw",
+    "contact_rr",
+    "contact_rl_raw",
+    "contact_rl",
+    # -- adaptive walking (per actuator row; empty while not walking) -------
+    "walk_phase_offset",
+    "walk_attitude_offset",
+    "walk_phase_lead_s",
+    "walk_rate_limited",
+    "walk_saturated",
+    "walk_ilc_correction",
 ]
+
+# Column order of the contact_* CSV pairs.
+_CONTACT_LEG_ORDER = (
+    LegId.FRONT_RIGHT,
+    LegId.FRONT_LEFT,
+    LegId.REAR_RIGHT,
+    LegId.REAR_LEFT,
+)
 
 # Event types teed from the WebSocket broadcast stream into events.jsonl.
 _TEED_EVENT_TYPES = frozenset(
@@ -105,6 +138,8 @@ _TEED_EVENT_TYPES = frozenset(
         "motion_request",
         "stabilization_state",
         "adaptive_walk_state",
+        "adaptive_walk_gate",
+        "adaptive_walk_ilc",
     }
 )
 
@@ -206,6 +241,7 @@ class ExperimentRecorder:
         self._control: ControlService | None = None
         self._stab: StabilizationController | None = None
         self._sensor: SensorService | None = None
+        self._walk: AdaptiveWalkingController | None = None
 
         # Run state (only meaningful while _running is True).
         self._running = False
@@ -233,10 +269,12 @@ class ExperimentRecorder:
         control_service: ControlService,
         stabilization_controller: StabilizationController,
         sensor_service: SensorService,
+        adaptive_walking: AdaptiveWalkingController | None = None,
     ) -> None:
         self._control = control_service
         self._stab = stabilization_controller
         self._sensor = sensor_service
+        self._walk = adaptive_walking
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -393,6 +431,26 @@ class ExperimentRecorder:
             imu_cols = [""] * 21
             confidence = ""
 
+        walk = self._walk.latest_debug() if self._walk is not None else None
+        if walk is not None and walk.active:
+            walk_cols = [
+                "1",
+                f"{walk.phase:.4f}",
+                str(walk.cycle_count),
+                f"{walk.motion_scale:.3f}",
+            ]
+        else:
+            walk_cols = ["0", "", "", ""]
+
+        contact_cols = [""] * 8
+        if self._sensor is not None:
+            by_leg = {state.leg: state for state in self._sensor.latest_contact()}
+            for slot, leg in enumerate(_CONTACT_LEG_ORDER):
+                state = by_leg.get(leg)
+                if state is not None and state.raw is not None:
+                    contact_cols[slot * 2] = str(state.raw)
+                    contact_cols[slot * 2 + 1] = "1" if state.supporting else "0"
+
         if stab_state is not None:
             stab_enabled = "1" if stab_state.enabled else "0"
             g = stab_state.gains
@@ -411,6 +469,18 @@ class ExperimentRecorder:
         prefix = [timestamp, f"{elapsed_ms:.1f}", self._experiment_id, self._git_sha, motion_frame]
         lines: list[str] = []
         for row in ctrl.rows:
+            if walk is not None and walk.active and row.actuator_id < len(walk.phase_offsets):
+                axis = row.actuator_id
+                walk_axis_cols = [
+                    f"{walk.phase_offsets[axis]:.2f}",
+                    f"{walk.attitude_offsets[axis]:.2f}",
+                    f"{walk.phase_leads_s[axis]:.4f}",
+                    "1" if walk.rate_limited[axis] else "0",
+                    "1" if walk.saturated[axis] else "0",
+                    f"{walk.ilc_corrections[axis]:.2f}",
+                ]
+            else:
+                walk_axis_cols = [""] * 6
             fields = [
                 *prefix,
                 *imu_cols,
@@ -424,6 +494,9 @@ class ExperimentRecorder:
                 stab_enabled,
                 *gain_cols,
                 confidence,
+                *walk_cols,
+                *contact_cols,
+                *walk_axis_cols,
             ]
             lines.append(",".join(fields))
         self._csv_file.write("\r\n".join(lines) + "\r\n")

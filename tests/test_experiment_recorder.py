@@ -86,6 +86,9 @@ class _FakeSensor:
     def level_offsets(self) -> tuple[float, float]:
         return self._offsets
 
+    def latest_contact(self) -> list:
+        return []
+
 
 def _make_attitude(*, accel_norm: float = 1.0, mag_valid: bool = True) -> AttitudeState:
     zero = Vector3(0.0, 0.0, 0.0)
@@ -277,7 +280,8 @@ def test_csv_header_exact(tmp_path: Path) -> None:
     summary = asyncio.run(scenario())
     header, _ = _read_csv(Path(summary.directory))
     assert header == CSV_HEADER
-    assert len(header) == 41
+    # 41 original columns + 4 walk + 8 contact + 6 per-actuator walk columns.
+    assert len(header) == 59
 
 
 def test_effective_target_row_invariant(tmp_path: Path) -> None:

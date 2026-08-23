@@ -85,11 +85,14 @@ def create_app() -> FastAPI:
         level_offsets_provider=sensor_service.level_offsets,
         event_sink=event_sink,
         stabilization_engaged=lambda: stabilization_controller.enabled,
+        contact_provider=sensor_service.latest_contact,
+        experiment_recorder=experiment_recorder,
     )
     experiment_recorder.bind(
         control_service=control_service,
         stabilization_controller=stabilization_controller,
         sensor_service=sensor_service,
+        adaptive_walking=adaptive_walking_controller,
     )
     # Authoritative (in-lock) side of the "no calibration while stabilization
     # is engaged" invariant; the route-level 409 pre-check alone is racy.

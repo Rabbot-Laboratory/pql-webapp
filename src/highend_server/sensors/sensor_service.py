@@ -18,6 +18,8 @@ from highend_server.domain.models import (
     AdcBankState,
     AdcChannelState,
     Bmx055State,
+    ContactCalibration,
+    ContactLegState,
     ImuCalibration,
     ImuOrientation,
     ImuQuaternion,
@@ -45,6 +47,7 @@ from highend_server.sensors.attitude import (
     quat_multiply,
     rotate_vector_by_quat_inverse,
 )
+from highend_server.sensors.contact import ContactDetector
 from highend_server.sensors.imu_bmx055 import Bmx055Reader, Bmx055Reading, Vector3
 from highend_server.sensors.imu_scenarios import ScenarioFn, get_scenario
 from highend_server.sensors.mag_calibration import apply_calibration as apply_mag_calibration
@@ -510,6 +513,11 @@ class SensorService:
         self._imu_active = False
         self._imu_error: str | None = None
         self._adc_banks: list[AdcBankState] = self._disabled_adc_banks()
+        self._contact_calibration = self._load_contact_calibration()
+        self._contact_detector = ContactDetector(self._contact_calibration)
+        self._contact_states: list[ContactLegState] = [
+            ContactLegState(leg=item.leg) for item in self._contact_calibration.legs
+        ]
         self._demo_started_at = monotonic()
         # Blocking smbus2/spidev opens are offloaded to a thread with this
         # timeout so a wedged device can never stall the event loop / startup.
@@ -543,6 +551,23 @@ class SensorService:
             self._imu_calibration.level_roll_deg,
             self._imu_calibration.level_pitch_deg,
         )
+
+    def latest_contact(self) -> list[ContactLegState]:
+        """Latest debounced per-leg contact states (empty until first poll)."""
+        return list(self._contact_states)
+
+    @property
+    def contact_calibration(self) -> ContactCalibration:
+        return self._contact_calibration
+
+    async def update_contact_calibration(self, calibration: ContactCalibration) -> SensorState:
+        """Persist a new contact calibration and restart detection with it."""
+        async with self._calibration_lock:
+            self._contact_calibration = calibration
+            self._contact_detector = ContactDetector(calibration)
+            self._contact_states = [ContactLegState(leg=item.leg) for item in calibration.legs]
+            await asyncio.to_thread(self._save_contact_calibration_sync)
+        return self.state
 
     @property
     def calibration_lock(self) -> asyncio.Lock:
@@ -688,6 +713,7 @@ class SensorService:
         await self._open_adc()
         # Prime ADC + publish an initial state before the periodic loop starts.
         self._read_adc_once()
+        self._contact_states = self._contact_detector.update(self._adc_banks)
         await self._publish()
         self._task = asyncio.create_task(self._poll_loop(), name="sensor-poll")
 
@@ -844,6 +870,8 @@ class SensorService:
         while True:
             await asyncio.sleep(interval)
             await asyncio.to_thread(self._read_adc_once)
+            # Exactly one detector update per ADC sample (debounce contract).
+            self._contact_states = self._contact_detector.update(self._adc_banks)
             await self._publish()
 
     def _read_adc_once(self) -> None:
@@ -930,6 +958,7 @@ class SensorService:
             enabled=self._enabled,
             imu=self._build_imu_state(),
             adc_banks=[bank.model_copy(deep=True) for bank in self._adc_banks],
+            contact=[state.model_copy() for state in self._contact_states],
             updated_at=datetime.now(UTC),
         )
 
@@ -1025,6 +1054,24 @@ class SensorService:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(self._imu_calibration.model_dump(mode="json"), indent=2),
+            encoding="utf-8",
+        )
+
+    def _load_contact_calibration(self) -> ContactCalibration:
+        path = self.settings.contact_calibration_path
+        if not path.exists():
+            return ContactCalibration()
+        try:
+            return ContactCalibration.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.exception("Failed to load contact calibration from %s", path)
+            return ContactCalibration()
+
+    def _save_contact_calibration_sync(self) -> None:
+        path = self.settings.contact_calibration_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self._contact_calibration.model_dump(mode="json"), indent=2),
             encoding="utf-8",
         )
 
