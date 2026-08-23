@@ -249,16 +249,22 @@ python scripts/robotctl.py experiment note "ここで手で右に傾けた"
 python scripts/robotctl.py experiment stop
 python scripts/robotctl.py experiment list
 python scripts/robotctl.py experiment show latest
+
+python scripts/robotctl.py characterize --axis 0 --amplitude 300  # 軸ステップ応答同定
+python scripts/walk_metrics.py metrics Logs/experiments/<ID>      # 歩行ラン解析
+python scripts/pi_fetch_logs.py                                   # Piから最新ランを回収
 ```
 
-リモートのPiに対しては `--host 192.168.x.x:8000` を付ける。危険操作(アクチュエータ駆動・安定化ON)は意図的に**含めていない** — それらはGUIか直接APIで行う。
+リモートのPiに対しては `--host 192.168.x.x:8000` を付ける。安定化ONは意図的に含めていない。
+**例外は `characterize` で、これはアクチュエータを実際に動かす**(既定±300、実行前に対話確認あり。
+`--yes` で省略可だが、必ず脚を浮かせた状態で使うこと)。
 
 ### 実験ログの構造
 
 `experiment start` ごとに `Logs/experiments/<YYYYMMDD_HHMMSS>_<type>/` が作られる:
 
 - `manifest.json` — git SHA/ブランチ/dirty、全ゲイン、Mahony設定、D項モード、config全スナップショット。「このログのときKpいくつだっけ?」を根絶する
-- `telemetry.csv` — 25Hz×8アクチュエータのlong format(37列)。各行で `base_target + round(stabilization_correction) == effective_target` が成立し、CSV再生の要求・IMU制御の上乗せ・実際の動きを1本の時系列で追える。IMU列(roll/pitch/yaw、gyro、accel、mag)と `accel_confidence_candidate`(|accel|-1g による high/medium/low、**記録のみ・制御非結合**)を含む
+- `telemetry.csv` — 25Hz×8アクチュエータのlong format(59列: 基本41列+歩行/接地列)。各行で `base_target + round(stabilization_correction) == effective_target` が成立し、CSV再生の要求・IMU制御の上乗せ・実際の動きを1本の時系列で追える。IMU列(roll/pitch/yaw、gyro、accel、mag)と `accel_confidence_candidate`(|accel|-1g による high/medium/low、**記録のみ・制御非結合**)を含む
 - `events.jsonl` — 安定化ON/OFF/自動無効化、再生イベント、較正、note を時刻付きで記録
 - `notes.md` — 自由記入
 

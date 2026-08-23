@@ -1,5 +1,7 @@
 # 2026-07-11 実機実験ログ・インベントリ
 
+> **ARCHIVED (2026-08-23)** — 当時の計測記録として保存。ここに書かれた推奨事項(Roll符号修正・raw/control列分離・accel_confidence記録 等)は実装済み。現状の正は `docs/codex_walking_loop_prompt.md` の「前提知識」を参照。
+
 生成元: `scripts/analyze_experiment_logs.py`。実験の分類は各 `manifest.json` の `experiment_type` / `name` と記録済みイベントのみを使用している。
 
 | experiment_id | type | duration_sec | Git SHA | frames | telemetry rows | period | gaps | IMU same-run | D項 | PID (R/P) | level offset R/P (deg) | files | valid | remarks |

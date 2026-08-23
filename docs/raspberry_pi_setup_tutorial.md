@@ -46,27 +46,30 @@ ping -c 3 pypi.org
 
 ## 3. 配置先ディレクトリを作る
 
-ここでは `Desktop` 配下へ配置する前提です。
+実運用のロボット(rabbot-labo)は `~/pql-webapp` を使っています。以下その前提で書きます
+(パス・ユーザー名は環境に合わせて読み替え)。
 
 ```bash
-mkdir -p ~/Desktop/Aircompressor_Robot
+git clone https://github.com/Rabbot-Laboratory/pql-webapp.git ~/pql-webapp
 ```
 
 ## 4. PC からコードを転送する
 
-Windows PowerShell から `scp` で転送する例です。
+初回は上記の `git clone` が最簡です。以後の更新は、開発PCから差分同期スクリプトを使うのが標準です:
 
 ```powershell
-scp -r C:\Users\MaedaNatsuki\Documents\Aircompressor_Robot\* wandora@<pi-ip>:/home/wandora/Desktop/Aircompressor_Robot/
+# 開発PC側(要 pip install -e ".[deploy]" と config/pi_connection.json — 雛形は
+# config/pi_connection.example.json)
+python scripts/pi_deploy.py --dry-run    # 転送内容の確認
+python scripts/pi_deploy.py --restart    # md5差分同期 + サービス再起動 + ヘルス確認
 ```
 
-注意:
-- `.venv`
-- `node_modules`
-- `__pycache__`
-- `.pytest_cache`
+`pi_deploy.py` はgit追跡ファイルと `web-vue/dist` のみ同期し、Pi側の
+`config/imu_calibration.json` / `.env` / `Logs/` には触りません。実験ログの回収は
+`python scripts/pi_fetch_logs.py`(最新ラン)です。
 
-のような生成物は基本的に転送不要です。
+手動 `scp -r` を使う場合は `.venv` / `node_modules` / `__pycache__` /
+`.pytest_cache` / `Logs` を除外してください。
 
 ## 5. Frontend の扱い
 
@@ -77,32 +80,48 @@ scp -r C:\Users\MaedaNatsuki\Documents\Aircompressor_Robot\* wandora@<pi-ip>:/ho
 Windows 側:
 
 ```powershell
-cd C:\Users\MaedaNatsuki\Documents\Aircompressor_Robot\web-vue
+cd web-vue
 npm.cmd install
-npm.cmd run build
+npx vite build
 ```
 
-これで生成された `web-vue/dist` を、プロジェクト転送時に一緒に載せます。
+これで生成された `web-vue/dist` は `pi_deploy.py` が一緒に同期します。
 
 補足:
-- Raspberry Pi 上で `npm install` / `npm run build` してもよい
-- ただし本番は `dist` があれば十分
+- `npx vite build` は型チェックを行わない。フル型チェックは
+  `npx vue-tsc -p tsconfig.app.json --noEmit`(three.js型定義欠如などの既存エラーあり。
+  新規エラーが増えていないかだけ確認する)
+- Raspberry Pi 上でビルドしてもよいが、本番は `dist` があれば十分
 
 ## 6. Raspberry Pi 上で Python 環境を作る
 
 ```bash
-cd ~/Desktop/Aircompressor_Robot
+cd ~/pql-webapp
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -U pip
-python -m pip install -e .[dev]
+python -m pip install -e ".[dev,pi-sensors]"   # pi-sensors = smbus2/spidev/evdev(IMU・ADC・ゲームパッド)
+```
+
+I2C / SPI を有効化して再起動:
+
+```bash
+sudo raspi-config    # Interface Options → I2C: Enable, SPI: Enable
+sudo reboot
 ```
 
 確認:
 
 ```bash
-python -c "import fastapi, uvicorn, serial; print('ok')"
+python -c "import fastapi, uvicorn, serial, smbus2, spidev; print('ok')"
+ls /dev/i2c-1 /dev/spidev0.*
+i2cdetect -y 1       # BMX055: 0x18(加速度) 0x68(ジャイロ) 0x10(磁気)
 ```
+
+接地センサADC(任意): 5V駆動のMCP3208をSPI0 CE0に接続(PiとはTXU0304レベルシフタ経由、
+`/dev/spidev0.0`、CH0-3=右前/左前/右後/左後)。配線詳細は readme の
+「Raspberry Pi IMU / ADC sensors」を参照。接地判定はサーバー側で行われ、既定では制御に
+使われない(表示・記録のみ)。
 
 ## 7. まずは demo モードで起動確認
 
@@ -150,6 +169,12 @@ HIGHEND_STABILIZATION_MAX_CORRECTION_RATE=400
 HIGHEND_STABILIZATION_MAX_TILT_DEG=30
 HIGHEND_STABILIZATION_MAX_STALENESS_SEC=0.2
 ```
+
+環境変数は作業ディレクトリの **`.env` ファイル**に書くのが標準です(gitignore済み、
+systemdの `WorkingDirectory` が設定されていれば自動で読まれる)。適応歩行の調整ノブ
+(`HIGHEND_ADAPTIVE_WALK_*`、ILC・接地ゲート等の全24項目)は `src/highend_server/config.py`
+が正で、運用手順は `docs/adaptive_walking_hardware_guide.md` と
+`docs/walking_fix_session_checklist.md` を参照してください。
 
 較正手順(水平 → ジャイロゼロ → 磁気較正)、GUI 操作、REST API、そして
 **実機での軸符号確認チェックリスト(初回電源投入時に必須)** は
@@ -253,6 +278,14 @@ curl http://127.0.0.1:8000/api/health
 - `emulate_devices: false`
 - `connection_state: connected`
 
+まとめて点検するには専用のプリフライトを使います(推奨。以後、実機セッションの最初に毎回実行):
+
+```bash
+cd ~/pql-webapp && .venv/bin/python scripts/preflight.py
+```
+
+Python/git/I2C/SPI/BMX055/シリアル2系統/APIヘルス/ログ書き込み/ディスク残量を一括確認します。
+
 ## 11. systemd で自動起動
 
 本番では `systemd` を推奨します。
@@ -271,16 +304,22 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=wandora
-WorkingDirectory=/home/wandora/Desktop/Aircompressor_Robot
-ExecStart=/home/wandora/Desktop/Aircompressor_Robot/.venv/bin/python -m highend_server
+User=rabbot
+WorkingDirectory=/home/rabbot/pql-webapp
+ExecStart=/home/rabbot/pql-webapp/.venv/bin/python -m highend_server
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+Environment=HIGHEND_SENSORS_ENABLED=true
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+`WorkingDirectory` が設定されているため、リポジトリ直下の `.env` に書いた
+`HIGHEND_*` 変数もサーバー起動時に読み込まれます(歩行パラメータの調整はサービス
+ファイルではなく `.env` 側で行い、`sudo systemctl restart highend-control.service`
+で反映するのが運用の基本)。
 
 反映:
 

@@ -5,7 +5,7 @@ An experiment is a per-run directory under ``Logs/experiments/<id>/`` holding:
 * ``manifest.json``  — run metadata (git, gains, imu config, config snapshot),
   written atomically (tmp + ``os.replace``) at start and again at stop.
 * ``telemetry.csv``  — long-format sample stream (one row per actuator per
-  sample tick), 41 fixed columns, block-buffered (never line-buffered).
+  sample tick), 59 fixed columns, block-buffered (never line-buffered).
 * ``events.jsonl``   — teed WebSocket / action events, one compact JSON line
   each, flushed per write.
 * ``notes.md``       — free-form operator notes appended live.

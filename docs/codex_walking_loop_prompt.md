@@ -30,7 +30,7 @@
 | 軸ステップ応答同定 | `python scripts/robotctl.py --host <pi-host> characterize --axis N --amplitude 300`(**実機が動く。実行前に必ず私の許可を取る**) |
 | テスト | `python -m pytest tests -q`(`tests/`のみ。single-leg-appは対象外) |
 | lint | `python -m ruff check src tests scripts` |
-| フロントビルド | `cd web-vue && npx vite build`(**`npm run build`は既存のvue-tscエラーで失敗するので使わない**) |
+| フロントビルド | `cd web-vue && npx vite build`(型チェックは走らない。フル型チェックは `npx vue-tsc -p tsconfig.app.json --noEmit` — three.js等の既存エラーが多数あるので新規エラーの有無だけ見る) |
 
 ## 前提知識(これまでの結論 — 再調査不要)
 

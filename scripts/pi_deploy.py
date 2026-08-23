@@ -11,8 +11,11 @@ Connection settings come from config/pi_connection.json (gitignored):
     {"host": "...", "user": "...", "password": "...", "remote_root": "..."}
 or the HIGHEND_PI_HOST / HIGHEND_PI_USER / HIGHEND_PI_PASSWORD env vars.
 
-NOTE: if web-vue/src changed, build first with `npx vite build` in web-vue/
-(`npm run build` fails on pre-existing vue-tsc errors — use plain vite build).
+NOTE: if web-vue/src changed, build first with `npx vite build` in web-vue/.
+(`npm run build` also works — its vue-tsc step checks zero files because the
+root tsconfig only has project references — but `npx vite build` is the
+explicit, version-proof form. The real type check is
+`npx vue-tsc -p tsconfig.app.json --noEmit`, which has pre-existing errors.)
 """
 
 from __future__ import annotations

@@ -1,0 +1,6 @@
+{
+  "host": "<tailscale-ip-or-hostname>",
+  "user": "rabbot",
+  "password": "<ssh-password>",
+  "remote_root": "/home/rabbot/pql-webapp"
+}
