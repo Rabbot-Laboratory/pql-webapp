@@ -57,6 +57,7 @@ Thumbs.db
 *.local.json
 config/imu_calibration.json
 config/contact_calibration.json
+config/pi_connection.json
 .claude/
 .highend_windows_ports.json
 .git.broken-*/
