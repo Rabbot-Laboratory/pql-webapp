@@ -7,8 +7,11 @@ import {
   cancelMagCalibration as apiCancelMagCalibration,
   createWebSocket,
   deleteMotionFile,
+  fetchAdaptiveWalk,
   fetchActuators,
   fetchHealth,
+  fetchGamepad,
+  fetchHardwareStatus,
   fetchLegPreviews,
   fetchSensors,
   fetchStabilization,
@@ -18,11 +21,13 @@ import {
   finishMagCalibration as apiFinishMagCalibration,
   importLegacyCsv,
   latestTelemetryRecordingDownloadUrl,
+  moveToHome,
   requestCapture,
   requestGain,
   requestGainSave,
   resetImuCalibration,
   saveMotionFile,
+  setAdaptiveForward,
   sendGain,
   sendTarget,
   startMagCalibration as apiStartMagCalibration,
@@ -34,9 +39,13 @@ import {
   updateStabilization,
 } from '@/services/controlApi';
 import type {
+  AdaptiveWalkState,
   ActuatorState,
   ControlMode,
   FixedMotion,
+  GamepadState,
+  HardwareStatus,
+  WebGamepadUpdate,
   ImportedMotionDraft,
   LegId,
   LegPreview,
@@ -54,6 +63,10 @@ import type {
   TelemetryRecordingStatus,
   TelemetrySample,
 } from '@/types/control';
+import {
+  deriveContactLegStates,
+  type ContactPolarity,
+} from '@/utils/contactSensors';
 
 type WsState = 'connecting' | 'live' | 'disconnected' | 'error';
 
@@ -93,7 +106,12 @@ export const useControlStore = defineStore('control', () => {
   const socket = ref<WebSocket | null>(null);
   const motionLibrary = ref<MotionLibrarySnapshot>({ fixed: [], custom: [] });
   const sensors = ref<SensorState | null>(null);
+  const gamepad = ref<GamepadState | null>(null);
+  const hardware = ref<HardwareStatus | null>(null);
+  const contactThreshold = ref(2048);
+  const contactPolarity = ref<ContactPolarity>('active_high');
   const stabilization = ref<StabilizationState | null>(null);
+  const adaptiveWalk = ref<AdaptiveWalkState | null>(null);
   const telemetryRecording = ref<TelemetryRecordingStatus>({
     is_recording: false,
     current_log_name: null,
@@ -124,6 +142,20 @@ export const useControlStore = defineStore('control', () => {
     () => actuators.value.find((item) => item.actuator_id === selectedActuatorId.value) ?? null,
   );
   const connectedActuatorCount = computed(() => actuators.value.length);
+  const contactLegStates = computed(() =>
+    deriveContactLegStates(sensors.value, contactThreshold.value, contactPolarity.value),
+  );
+  const supportingLegIds = computed(() =>
+    contactLegStates.value.filter((state) => state.supporting).map((state) => state.legId),
+  );
+
+  function setContactThreshold(value: number): void {
+    contactThreshold.value = Math.round(Math.max(0, Math.min(4095, value)));
+  }
+
+  function setContactPolarity(value: ContactPolarity): void {
+    contactPolarity.value = value;
+  }
 
   function appendActuatorHistory(actuator: ActuatorState): void {
     const sample = sampleFromActuator(actuator);
@@ -239,6 +271,9 @@ export const useControlStore = defineStore('control', () => {
         legs?: LegPreview[];
         sensors?: SensorState;
         stabilization?: StabilizationState;
+        adaptive_walk?: AdaptiveWalkState;
+        gamepad?: GamepadState;
+        hardware?: HardwareStatus;
       } | null;
       // Defensive guard: a malformed/partial snapshot payload must not write `undefined`
       // into these typed refs (components dereference them without further null checks).
@@ -248,6 +283,9 @@ export const useControlStore = defineStore('control', () => {
       system.value = payload.system;
       sensors.value = payload.sensors ?? null;
       stabilization.value = payload.stabilization ?? null;
+      adaptiveWalk.value = payload.adaptive_walk ?? null;
+      gamepad.value = payload.gamepad ?? null;
+      hardware.value = payload.hardware ?? null;
       telemetryRecording.value = {
         ...telemetryRecording.value,
         is_recording: payload.system.telemetry_recording,
@@ -309,6 +347,22 @@ export const useControlStore = defineStore('control', () => {
       return;
     }
 
+    if (event.type === 'gamepad_state') {
+      const gamepadPayload = (event.payload as { gamepad?: GamepadState } | null)?.gamepad;
+      if (gamepadPayload) {
+        gamepad.value = gamepadPayload;
+      }
+      return;
+    }
+
+    if (event.type === 'hardware_status') {
+      const hardwarePayload = (event.payload as { hardware?: HardwareStatus } | null)?.hardware;
+      if (hardwarePayload) {
+        hardware.value = hardwarePayload;
+      }
+      return;
+    }
+
     if (event.type === 'stabilization_state') {
       // Server already throttles this to ~8Hz (plus transition events), and the
       // stabilization panel doesn't drive any three.js work, so apply it directly
@@ -316,6 +370,14 @@ export const useControlStore = defineStore('control', () => {
       const stabilizationPayload = (event.payload as { stabilization?: StabilizationState } | null)?.stabilization;
       if (stabilizationPayload) {
         stabilization.value = stabilizationPayload;
+      }
+      return;
+    }
+
+    if (event.type === 'adaptive_walk_state') {
+      const walkingPayload = (event.payload as { adaptive_walk?: AdaptiveWalkState } | null)?.adaptive_walk;
+      if (walkingPayload) {
+        adaptiveWalk.value = walkingPayload;
       }
       return;
     }
@@ -337,7 +399,7 @@ export const useControlStore = defineStore('control', () => {
   async function refresh(): Promise<void> {
     loading.value = true;
     try {
-      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot, stabilizationSnapshot] =
+      const [health, actuatorSnapshot, legSnapshot, librarySnapshot, recordingStatus, sensorSnapshot, stabilizationSnapshot, adaptiveWalkSnapshot, gamepadSnapshot, hardwareSnapshot] =
         await Promise.all([
           fetchHealth(),
           fetchActuators(),
@@ -346,6 +408,9 @@ export const useControlStore = defineStore('control', () => {
           fetchTelemetryRecordingStatus(),
           fetchSensors(),
           fetchStabilization(),
+          fetchAdaptiveWalk(),
+          fetchGamepad(),
+          fetchHardwareStatus(),
         ]);
       system.value = health.system;
       actuators.value = actuatorSnapshot.items;
@@ -354,6 +419,9 @@ export const useControlStore = defineStore('control', () => {
       motionLibrary.value = librarySnapshot;
       sensors.value = sensorSnapshot.item;
       stabilization.value = stabilizationSnapshot;
+      adaptiveWalk.value = adaptiveWalkSnapshot;
+      gamepad.value = gamepadSnapshot.item;
+      hardware.value = hardwareSnapshot.item;
       telemetryRecording.value = recordingStatus;
       syncSelectedTargets();
     } finally {
@@ -389,6 +457,15 @@ export const useControlStore = defineStore('control', () => {
     socket.value.addEventListener('error', () => {
       wsState.value = 'error';
     });
+  }
+
+  function sendWebGamepadUpdate(update: WebGamepadUpdate): boolean {
+    const currentSocket = socket.value;
+    if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    currentSocket.send(JSON.stringify({ type: 'gamepad_input', payload: update }));
+    return true;
   }
 
   async function initialize(): Promise<void> {
@@ -501,7 +578,22 @@ export const useControlStore = defineStore('control', () => {
   }
 
   async function stopPlayback(): Promise<void> {
+    adaptiveWalk.value = await setAdaptiveForward({
+      pressed: false,
+      safety_confirmed: false,
+    });
     await stopCsvPlayback();
+  }
+
+  async function setForwardPressed(pressed: boolean, safetyConfirmed: boolean): Promise<void> {
+    adaptiveWalk.value = await setAdaptiveForward({
+      pressed,
+      safety_confirmed: safetyConfirmed,
+    });
+  }
+
+  async function moveHome(safetyConfirmed: boolean): Promise<void> {
+    await moveToHome({ safety_confirmed: safetyConfirmed });
   }
 
   async function activateFreeMode(): Promise<void> {
@@ -648,23 +740,33 @@ export const useControlStore = defineStore('control', () => {
 
   return {
     activeTab,
+    adaptiveWalk,
     actuators,
     actuatorHistories,
     applyStabilizationGains,
     cancelMagCalibration,
     capture,
     connectedActuatorCount,
+    contactLegStates,
+    contactPolarity,
+    contactThreshold,
     dispose,
     finishMagCalibration,
     focusedLeg,
     focusedLegId,
+    gamepad,
+    hardware,
     importLegacyCsvDraft,
     initialize,
     legs,
     loading,
     loadMotionFile,
     motionLibrary,
+    moveHome,
     sensors,
+    setContactPolarity,
+    setContactThreshold,
+    setForwardPressed,
     setStabilizationEnabled,
     stabilization,
     startMagCalibration,
@@ -677,6 +779,7 @@ export const useControlStore = defineStore('control', () => {
     deleteMotion,
     saveMotion,
     saveCapture,
+    sendWebGamepadUpdate,
     selectActuator,
     selectLeg,
     selectedActuator,
@@ -695,6 +798,7 @@ export const useControlStore = defineStore('control', () => {
     triggerFixedMotion,
     stopPlayback,
     system,
+    supportingLegIds,
     wsState,
   };
 });

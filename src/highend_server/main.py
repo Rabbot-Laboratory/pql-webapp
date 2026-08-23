@@ -8,11 +8,14 @@ from fastapi.staticfiles import StaticFiles
 
 from highend_server.api.routes import router
 from highend_server.api.websocket_manager import WebSocketManager
+from highend_server.application.adaptive_walking import AdaptiveWalkingController
 from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import ExperimentRecorder
+from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
 from highend_server.config import get_settings
 from highend_server.domain.models import TelemetryEvent
+from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
 from highend_server.transport.serial_gateway import build_gateway
 
@@ -25,12 +28,18 @@ PQL_A00_MESH_DIR = Path(__file__).resolve().parents[2] / "pql-a00_description" /
 async def lifespan(app: FastAPI):
     await app.state.control_service.connect()
     await app.state.sensor_service.start()
+    await app.state.hardware_status_service.start()
+    await app.state.gamepad_service.start()
     await app.state.stabilization_controller.start()
+    await app.state.adaptive_walking_controller.start()
     try:
         yield
     finally:
         await app.state.experiment_recorder.shutdown()
+        await app.state.adaptive_walking_controller.stop()
         await app.state.stabilization_controller.stop()
+        await app.state.gamepad_service.stop()
+        await app.state.hardware_status_service.stop()
         await app.state.sensor_service.stop()
         await app.state.control_service.shutdown()
 
@@ -52,6 +61,13 @@ def create_app() -> FastAPI:
         settings=settings, gateway=gateway, event_sink=event_sink
     )
     sensor_service = SensorService(settings=settings, event_sink=event_sink)
+    gamepad_service = GamepadService(settings=settings, event_sink=event_sink)
+    hardware_status_service = HardwareStatusService(
+        settings=settings,
+        gateway=gateway,
+        sensor_service=sensor_service,
+        event_sink=event_sink,
+    )
     control_service.set_attitude_provider(sensor_service.latest_attitude)
     control_service.set_level_offsets_provider(sensor_service.level_offsets)
     stabilization_controller = StabilizationController(
@@ -62,6 +78,14 @@ def create_app() -> FastAPI:
         event_sink=event_sink,
         calibration_lock=sensor_service.calibration_lock,
     )
+    adaptive_walking_controller = AdaptiveWalkingController(
+        settings=settings,
+        control_service=control_service,
+        attitude_provider=sensor_service.latest_attitude,
+        level_offsets_provider=sensor_service.level_offsets,
+        event_sink=event_sink,
+        stabilization_engaged=lambda: stabilization_controller.enabled,
+    )
     experiment_recorder.bind(
         control_service=control_service,
         stabilization_controller=stabilization_controller,
@@ -69,7 +93,9 @@ def create_app() -> FastAPI:
     )
     # Authoritative (in-lock) side of the "no calibration while stabilization
     # is engaged" invariant; the route-level 409 pre-check alone is racy.
-    sensor_service.set_stabilization_guard(lambda: stabilization_controller.enabled)
+    sensor_service.set_stabilization_guard(
+        lambda: stabilization_controller.enabled or adaptive_walking_controller.active
+    )
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(
@@ -84,7 +110,10 @@ def create_app() -> FastAPI:
     app.state.websocket_manager = websocket_manager
     app.state.control_service = control_service
     app.state.sensor_service = sensor_service
+    app.state.gamepad_service = gamepad_service
+    app.state.hardware_status_service = hardware_status_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.adaptive_walking_controller = adaptive_walking_controller
     app.state.experiment_recorder = experiment_recorder
 
     app.include_router(router, prefix="/api")

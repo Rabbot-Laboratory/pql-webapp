@@ -1,7 +1,7 @@
 import asyncio
 
 from highend_server.config import Settings
-from highend_server.domain.models import ControlMode, DeviceEnvelope, PortRole
+from highend_server.domain.models import ConnectionState, ControlMode, DeviceEnvelope, PortRole
 from highend_server.protocol.frames import (
     build_request_gain_frame,
     build_set_target_frame,
@@ -93,3 +93,20 @@ def test_pyserial_gateway_read_chunk_falls_back_when_in_waiting_is_none() -> Non
 
     assert chunk == b"x"
     assert connection.requested_size == 1
+
+
+def test_real_gateway_starts_and_retries_when_all_ports_are_missing() -> None:
+    async def scenario() -> None:
+        gateway = PySerialGateway(Settings(emulate_devices=False))
+        gateway._open_connection = lambda _role: None  # type: ignore[method-assign]
+
+        await gateway.connect()
+        try:
+            assert gateway.connection_state is ConnectionState.ERROR
+            states = gateway.port_states()
+            assert len(states) == 2
+            assert all(state.connection_state is ConnectionState.CONNECTING for state in states)
+        finally:
+            await gateway.disconnect()
+
+    asyncio.run(scenario())

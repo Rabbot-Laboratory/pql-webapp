@@ -5,7 +5,7 @@ An experiment is a per-run directory under ``Logs/experiments/<id>/`` holding:
 * ``manifest.json``  — run metadata (git, gains, imu config, config snapshot),
   written atomically (tmp + ``os.replace``) at start and again at stop.
 * ``telemetry.csv``  — long-format sample stream (one row per actuator per
-  sample tick), 37 fixed columns, block-buffered (never line-buffered).
+  sample tick), 41 fixed columns, block-buffered (never line-buffered).
 * ``events.jsonl``   — teed WebSocket / action events, one compact JSON line
   each, flushed per write.
 * ``notes.md``       — free-form operator notes appended live.
@@ -32,6 +32,7 @@ from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
 
+from highend_server.application.attitude_control_frame import AttitudeControlFrame
 from highend_server.config import Settings
 from highend_server.domain.models import (
     ExperimentGitInfo,
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Exact experiment telemetry CSV header (37 columns, order is load-bearing).
+# Exact experiment telemetry CSV header (41 columns, order is load-bearing).
 CSV_HEADER: list[str] = [
     "timestamp",
     "elapsed_ms",
@@ -58,6 +59,10 @@ CSV_HEADER: list[str] = [
     "motion_frame",
     "roll",
     "pitch",
+    "level_roll",
+    "level_pitch",
+    "control_roll",
+    "control_pitch",
     "yaw",
     "gyro_x",
     "gyro_y",
@@ -92,7 +97,15 @@ CSV_HEADER: list[str] = [
 
 # Event types teed from the WebSocket broadcast stream into events.jsonl.
 _TEED_EVENT_TYPES = frozenset(
-    {"csv_playback_status", "playback_guard", "motion_request", "stabilization_state"}
+    {
+        "csv_playback_status",
+        "gamepad_state",
+        "hardware_status",
+        "playback_guard",
+        "motion_request",
+        "stabilization_state",
+        "adaptive_walk_state",
+    }
 )
 
 
@@ -184,6 +197,10 @@ class ExperimentRecorder:
         self._settings = settings
         self._time_fn = time_fn
         self._lock = asyncio.Lock()
+        self._attitude_frame = AttitudeControlFrame(
+            roll_sign=settings.stabilization_roll_sign,
+            pitch_sign=settings.stabilization_pitch_sign,
+        )
 
         # Late-bound collaborators (see bind()).
         self._control: ControlService | None = None
@@ -336,9 +353,25 @@ class ExperimentRecorder:
         if attitude is not None:
             accel = attitude.accel_g
             accel_norm = math.sqrt(accel.x**2 + accel.y**2 + accel.z**2)
+            if self._sensor is not None:
+                offset_roll, offset_pitch = self._sensor.level_offsets()
+            else:
+                offset_roll, offset_pitch = (0.0, 0.0)
+            level_roll = attitude.euler.roll_deg - offset_roll
+            level_pitch = attitude.euler.pitch_deg - offset_pitch
+            control_roll, control_pitch = self._attitude_frame.tilt(
+                raw_roll_deg=attitude.euler.roll_deg,
+                raw_pitch_deg=attitude.euler.pitch_deg,
+                level_roll_offset_deg=offset_roll,
+                level_pitch_offset_deg=offset_pitch,
+            )
             imu_cols = [
                 f"{attitude.euler.roll_deg:.3f}",
                 f"{attitude.euler.pitch_deg:.3f}",
+                f"{level_roll:.3f}",
+                f"{level_pitch:.3f}",
+                f"{control_roll:.3f}",
+                f"{control_pitch:.3f}",
                 f"{attitude.euler.yaw_deg:.3f}",
                 f"{attitude.gyro_dps.x:.3f}",
                 f"{attitude.gyro_dps.y:.3f}",
@@ -357,7 +390,7 @@ class ExperimentRecorder:
             ]
             confidence = accel_confidence_candidate(accel_norm)
         else:
-            imu_cols = [""] * 17
+            imu_cols = [""] * 21
             confidence = ""
 
         if stab_state is not None:

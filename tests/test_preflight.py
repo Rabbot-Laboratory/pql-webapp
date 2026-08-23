@@ -52,6 +52,19 @@ def test_check_i2c_ng_when_device_missing(tmp_path: Path) -> None:
     assert result.status == "NG"
 
 
+def test_check_spi_ok_when_device_exists(tmp_path: Path) -> None:
+    dev = tmp_path / "spidev0.0"
+    dev.touch()
+    result = preflight.check_spi(str(dev))
+    assert result.status == "OK"
+
+
+def test_check_spi_ng_when_device_missing(tmp_path: Path) -> None:
+    result = preflight.check_spi(str(tmp_path / "does-not-exist"))
+    assert result.status == "NG"
+    assert "enable SPI0" in result.detail
+
+
 def test_check_serial_ports_ok_when_all_present(tmp_path: Path) -> None:
     front = tmp_path / "ttyUSB-Front"
     back = tmp_path / "ttyUSB-Back"
@@ -136,7 +149,15 @@ def test_main_exit_code_one_when_required_ng(monkeypatch: pytest.MonkeyPatch) ->
 def test_run_preflight_returns_all_checks() -> None:
     results = preflight.run_preflight(project_root=PROJECT_ROOT)
     names = {result.name for result in results}
-    assert {"Python", "Git", "I2C bus", "BMX055", "Serial ports", "Disk free"} <= names
+    assert {
+        "Python",
+        "Git",
+        "I2C bus",
+        "SPI bus",
+        "BMX055",
+        "Serial ports",
+        "Disk free",
+    } <= names
 
 
 # --------------------------------------------------------------------------

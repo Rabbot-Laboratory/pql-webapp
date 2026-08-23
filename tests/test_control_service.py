@@ -5,7 +5,10 @@ from time import monotonic
 
 import pytest
 
-from highend_server.application.control_service import ControlService
+from highend_server.application.control_service import (
+    ControlService,
+    build_rate_limited_position_rows,
+)
 from highend_server.config import Settings
 from highend_server.domain.models import (
     CsvPlaybackRequest,
@@ -80,6 +83,23 @@ def _build_control(settings=None, attitude_provider=None, level_offsets_provider
         level_offsets_provider=level_offsets_provider,
     )
     return control, gateway, events
+
+
+def test_home_rows_reach_target_without_exceeding_rate() -> None:
+    rows = build_rate_limited_position_rows(
+        [0, 4095],
+        [100, 3995],
+        max_rate=50.0,
+        interval_sec=0.1,
+    )
+
+    assert rows[-1] == ["100", "3995"]
+    numeric = [[0, 4095], *[[int(value) for value in row] for row in rows]]
+    assert all(
+        abs(current[index] - previous[index]) <= 5
+        for previous, current in zip(numeric, numeric[1:], strict=False)
+        for index in range(2)
+    )
 
 
 # --------------------------------------------------------------------------

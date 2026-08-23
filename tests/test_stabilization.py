@@ -6,6 +6,7 @@ import json
 import pytest
 
 from highend_server.application.control_service import ControlService
+from highend_server.application.pql_a00_kinematics import leg_height_deltas
 from highend_server.application.stabilization import (
     DEFAULT_MIXING_MATRIX,
     AxisPid,
@@ -15,6 +16,7 @@ from highend_server.application.stabilization import (
 from highend_server.config import Settings
 from highend_server.domain.models import (
     ControlMode,
+    LegId,
     PortRole,
     SetTargetRequest,
     StabilizationGains,
@@ -65,7 +67,14 @@ def make_attitude(roll: float, pitch: float, timestamp: float) -> AttitudeState:
 
 
 def _settings(**overrides) -> Settings:
-    base = dict(emulate_devices=True, actuator_count=8)
+    # Most controller mechanics tests use the conventional identity control
+    # frame. Trial-derived production signs are covered explicitly below.
+    base = dict(
+        emulate_devices=True,
+        actuator_count=8,
+        stabilization_roll_sign=1,
+        stabilization_pitch_sign=1,
+    )
     base.update(overrides)
     return Settings(**base)
 
@@ -151,7 +160,7 @@ def _position_frames(gateway: StubSerialGateway) -> list[tuple[PortRole, list[in
 # --------------------------------------------------------------------------
 
 
-def test_mixing_matrix_positive_roll_lifts_right_side(tmp_path) -> None:
+def test_mixing_matrix_positive_roll_lifts_right_model_feet(tmp_path) -> None:
     async def scenario() -> None:
         gains = StabilizationGains(
             kp_roll=1.5, ki_roll=0.0, kd_roll=0.0, kp_pitch=1.5, ki_pitch=0.0, kd_pitch=0.0
@@ -161,17 +170,18 @@ def test_mixing_matrix_positive_roll_lifts_right_side(tmp_path) -> None:
         holder["attitude"] = make_attitude(roll=10.0, pitch=0.0, timestamp=clock())
         await _step_dt(controller, clock, 1.0)
 
-        corr = controller._corrections
-        # right-side-down => extend right legs (positive), retract left (negative).
-        for i in RIGHT_ACTUATORS:
-            assert corr[i] > 0.0, f"actuator {i} should be positive, got {corr[i]}"
-        for i in LEFT_ACTUATORS:
-            assert corr[i] < 0.0, f"actuator {i} should be negative, got {corr[i]}"
+        heights = leg_height_deltas(controller._corrections)
+        # Target direction differs between hip/knee joints.  The model result,
+        # not a common target sign, is the invariant: right model feet rise.
+        assert heights[LegId.FRONT_RIGHT] > 0.0
+        assert heights[LegId.REAR_RIGHT] > 0.0
+        assert heights[LegId.FRONT_LEFT] < 0.0
+        assert heights[LegId.REAR_LEFT] < 0.0
 
     asyncio.run(scenario())
 
 
-def test_mixing_matrix_positive_pitch_lifts_rear(tmp_path) -> None:
+def test_mixing_matrix_positive_pitch_lifts_rear_model_feet(tmp_path) -> None:
     async def scenario() -> None:
         gains = StabilizationGains(
             kp_roll=1.5, ki_roll=0.0, kd_roll=0.0, kp_pitch=1.5, ki_pitch=0.0, kd_pitch=0.0
@@ -181,12 +191,41 @@ def test_mixing_matrix_positive_pitch_lifts_rear(tmp_path) -> None:
         holder["attitude"] = make_attitude(roll=0.0, pitch=10.0, timestamp=clock())
         await _step_dt(controller, clock, 1.0)
 
-        corr = controller._corrections
-        # nose-up => extend rear legs (positive), retract front (negative).
-        for i in REAR_ACTUATORS:
-            assert corr[i] > 0.0, f"rear actuator {i} should be positive, got {corr[i]}"
-        for i in FRONT_ACTUATORS:
-            assert corr[i] < 0.0, f"front actuator {i} should be negative, got {corr[i]}"
+        heights = leg_height_deltas(controller._corrections)
+        assert heights[LegId.REAR_RIGHT] > 0.0
+        assert heights[LegId.REAR_LEFT] > 0.0
+        assert heights[LegId.FRONT_RIGHT] < 0.0
+        assert heights[LegId.FRONT_LEFT] < 0.0
+
+    asyncio.run(scenario())
+
+
+def test_trial_derived_default_roll_sign_lifts_right_for_negative_raw_roll(tmp_path) -> None:
+    async def scenario() -> None:
+        gains = StabilizationGains(
+            kp_roll=1.5,
+            ki_roll=0.0,
+            kd_roll=0.0,
+            kp_pitch=1.5,
+            ki_pitch=0.0,
+            kd_pitch=0.0,
+        )
+        # Do not use the identity-frame test fixture here: this is the actual
+        # Settings default established by the 2026-07-11 manual IMU trial.
+        settings = Settings(emulate_devices=True, actuator_count=8)
+        controller, _control, _gw, holder, clock, _events = _build(
+            tmp_path,
+            settings=settings,
+            gains=gains,
+        )
+        controller._enable()
+        holder["attitude"] = make_attitude(roll=-10.0, pitch=0.0, timestamp=clock())
+        await _step_dt(controller, clock, 1.0)
+
+        assert controller.get_state().roll_deg == pytest.approx(10.0)
+        heights = leg_height_deltas(controller._corrections)
+        assert heights[LegId.FRONT_RIGHT] > 0.0
+        assert heights[LegId.REAR_RIGHT] > 0.0
 
     asyncio.run(scenario())
 

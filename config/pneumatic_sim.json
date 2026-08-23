@@ -1,0 +1,54 @@
+{
+  "gait": {
+    "cycle_s": 2.2,
+    "duty_factor": 0.75,
+    "stride_m": 0.100,
+    "lift_m": 0.040,
+    "front_stride_scale": 1.70,
+    "rear_stride_scale": 1.80,
+    "rear_lift_scale": 0.75,
+    "rear_phase_offset": 0.15,
+    "rear_kick_fraction": 0.30,
+    "rear_push_m": 0.030,
+    "rear_knee_limit_rad": 0.30,
+    "startup_s": 1.0,
+    "ramp_s": 1.0
+  },
+  "adaptive_control": {
+    "enabled": true,
+    "learning_rate": 0.45,
+    "initial_lead_s": 0.04,
+    "max_lead_s": 0.30,
+    "feedback_gain": 0.25
+  },
+  "imu": {
+    "sample_rate_hz": 100.0,
+    "delay_s": 0.02,
+    "orientation_noise_std_deg": 0.12,
+    "gyro_noise_std_deg_s": 0.35,
+    "roll_bias_deg": 0.10,
+    "pitch_bias_deg": -0.10,
+    "random_seed": 7
+  },
+  "adaptive_attitude_control": {
+    "enabled": true,
+    "kp": 0.55,
+    "kd_s": 0.045,
+    "adaptation_rate": 0.10,
+    "trim_leak_rate": 0.015,
+    "adaptation_deadband_deg": 0.35,
+    "max_trim_deg": 4.0,
+    "max_slope_deg": 8.0,
+    "max_foot_correction_m": 0.022
+  },
+  "actuators": {
+    "rev_fr2": {"delay_s": 0.055, "extend_speed_rad_s": 0.78, "retract_speed_rad_s": 0.92, "time_constant_s": 0.085, "deadband_rad": 0.004, "kp_nm_rad": 175.0, "kd_nm_s_rad": 8.0, "max_torque_nm": 35.0},
+    "rev_fr3": {"delay_s": 0.070, "extend_speed_rad_s": 0.88, "retract_speed_rad_s": 1.02, "time_constant_s": 0.100, "deadband_rad": 0.005, "kp_nm_rad": 190.0, "kd_nm_s_rad": 8.5, "max_torque_nm": 35.0},
+    "rev_fl2": {"delay_s": 0.065, "extend_speed_rad_s": 0.72, "retract_speed_rad_s": 0.86, "time_constant_s": 0.095, "deadband_rad": 0.005, "kp_nm_rad": 170.0, "kd_nm_s_rad": 8.0, "max_torque_nm": 35.0},
+    "rev_fl3": {"delay_s": 0.080, "extend_speed_rad_s": 0.82, "retract_speed_rad_s": 0.96, "time_constant_s": 0.110, "deadband_rad": 0.006, "kp_nm_rad": 185.0, "kd_nm_s_rad": 8.5, "max_torque_nm": 35.0},
+    "rev_rr2": {"delay_s": 0.050, "extend_speed_rad_s": 0.84, "retract_speed_rad_s": 0.90, "time_constant_s": 0.080, "deadband_rad": 0.004, "kp_nm_rad": 180.0, "kd_nm_s_rad": 8.0, "max_torque_nm": 35.0},
+    "rev_rr3": {"delay_s": 0.075, "extend_speed_rad_s": 0.90, "retract_speed_rad_s": 1.08, "time_constant_s": 0.105, "deadband_rad": 0.005, "kp_nm_rad": 195.0, "kd_nm_s_rad": 9.0, "max_torque_nm": 35.0},
+    "rev_rl2": {"delay_s": 0.072, "extend_speed_rad_s": 0.68, "retract_speed_rad_s": 0.82, "time_constant_s": 0.105, "deadband_rad": 0.006, "kp_nm_rad": 168.0, "kd_nm_s_rad": 8.0, "max_torque_nm": 35.0},
+    "rev_rl3": {"delay_s": 0.090, "extend_speed_rad_s": 0.78, "retract_speed_rad_s": 0.94, "time_constant_s": 0.120, "deadband_rad": 0.007, "kp_nm_rad": 182.0, "kd_nm_s_rad": 8.5, "max_torque_nm": 35.0}
+  }
+}

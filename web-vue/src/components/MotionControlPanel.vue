@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import Button from 'primevue/button';
 import Card from 'primevue/card';
@@ -35,8 +35,13 @@ const teachingIntervalMs = ref(80);
 const teachingRecording = ref(false);
 const teachingRows = ref<string[][]>([]);
 const teachingStartedAt = ref<number | null>(null);
+const walkSafetyConfirmed = ref(false);
+const forwardHeld = ref(false);
+const forwardBusy = ref(false);
 
 let teachingTimer: number | null = null;
+let forwardKeepaliveTimer: number | null = null;
+let forwardRequest: Promise<void> | null = null;
 
 const saveCategoryOptions = [
   { label: 'Custom Motion', value: 'custom' },
@@ -71,6 +76,110 @@ const canStartTeaching = computed(
   () => actuatorOrder.value.length > 0 && airOffConfirmed.value && !teachingRecording.value,
 );
 const canUseFreeMode = computed(() => actuatorOrder.value.length > 0 && airOffConfirmed.value);
+const imuReady = computed(
+  () => store.sensors?.imu.connection_state === 'connected' && store.sensors.imu.orientation !== null,
+);
+const canHoldForward = computed(
+  () =>
+    walkSafetyConfirmed.value &&
+    imuReady.value &&
+    store.wsState === 'live' &&
+    !store.stabilization?.enabled &&
+    !forwardBusy.value,
+);
+const walkStatusLabel = computed(() => {
+  if (store.adaptiveWalk?.active) return '前進中（ボタン保持）';
+  if (store.adaptiveWalk?.auto_stopped) return '安全停止';
+  return '停止中';
+});
+const walkStatusSeverity = computed(() => {
+  if (store.adaptiveWalk?.active) return 'success';
+  if (store.adaptiveWalk?.auto_stopped) return 'danger';
+  return 'secondary';
+});
+
+async function sendForwardState(pressed: boolean): Promise<void> {
+  const request = store.setForwardPressed(pressed, pressed && walkSafetyConfirmed.value);
+  forwardRequest = request;
+  try {
+    await request;
+  } finally {
+    if (forwardRequest === request) {
+      forwardRequest = null;
+    }
+  }
+}
+
+async function renewForwardLease(): Promise<void> {
+  if (!forwardHeld.value || forwardRequest !== null) {
+    return;
+  }
+  try {
+    await sendForwardState(true);
+  } catch (error) {
+    await endForward();
+    toast.add({
+      severity: 'error',
+      summary: '前進制御を安全停止しました',
+      detail: error instanceof Error ? error.message : '前進リースの更新に失敗しました',
+      life: 3500,
+    });
+  }
+}
+
+async function beginForward(): Promise<void> {
+  if (!canHoldForward.value || forwardHeld.value) {
+    return;
+  }
+  forwardHeld.value = true;
+  forwardBusy.value = true;
+  try {
+    await sendForwardState(true);
+    forwardKeepaliveTimer = window.setInterval(() => {
+      void renewForwardLease();
+    }, 150);
+  } catch (error) {
+    forwardHeld.value = false;
+    toast.add({
+      severity: 'error',
+      summary: '前進を開始できません',
+      detail: error instanceof Error ? error.message : 'IMUまたは制御状態を確認してください',
+      life: 3500,
+    });
+  } finally {
+    forwardBusy.value = false;
+  }
+}
+
+async function endForward(): Promise<void> {
+  const wasHeld = forwardHeld.value;
+  forwardHeld.value = false;
+  if (forwardKeepaliveTimer !== null) {
+    window.clearInterval(forwardKeepaliveTimer);
+    forwardKeepaliveTimer = null;
+  }
+  if (forwardRequest !== null) {
+    try {
+      await forwardRequest;
+    } catch {
+      // The explicit release below or the server's 450 ms lease will stop output.
+    }
+  }
+  if (!wasHeld && !store.adaptiveWalk?.active) {
+    return;
+  }
+  try {
+    await sendForwardState(false);
+  } catch {
+    // Network loss is fail-safe: the server-side lease expires without keepalives.
+  }
+}
+
+function releaseOnVisibilityLoss(): void {
+  if (document.hidden) {
+    void endForward();
+  }
+}
 
 function motionKey(category: MotionCategory, name: string): string {
   return `${category}:${name}`;
@@ -438,13 +547,91 @@ watch(
   },
 );
 
+watch(
+  () => store.wsState,
+  (state) => {
+    if (state !== 'live') {
+      void endForward();
+    }
+  },
+);
+
+onMounted(() => {
+  window.addEventListener('blur', endForward);
+  document.addEventListener('visibilitychange', releaseOnVisibilityLoss);
+});
+
 onBeforeUnmount(() => {
   stopTeaching();
+  void endForward();
+  window.removeEventListener('blur', endForward);
+  document.removeEventListener('visibilitychange', releaseOnVisibilityLoss);
 });
 </script>
 
 <template>
   <section class="motion-page">
+    <Card class="motion-card adaptive-walk-card">
+      <template #title>IMU適応歩行</template>
+      <template #subtitle>前進ボタンを押している間だけ、低振幅クロールを実行します。</template>
+      <template #content>
+        <div class="adaptive-walk-layout">
+          <div class="adaptive-walk-controls">
+            <div class="motion-check-row adaptive-walk-confirmation">
+              <Checkbox v-model="walkSafetyConfirmed" binary input-id="walk-safety-confirmed" />
+              <label for="walk-safety-confirmed">
+                周囲の安全、支持具、非常停止手段を確認しました
+              </label>
+            </div>
+
+            <Button
+              class="forward-hold-button"
+              :class="{ 'is-held': forwardHeld || store.adaptiveWalk?.active }"
+              :label="forwardHeld ? '押下中：前進' : '押している間だけ前進'"
+              icon="pi pi-arrow-up"
+              severity="success"
+              :disabled="!canHoldForward && !forwardHeld"
+              @pointerdown.prevent="beginForward"
+              @pointerup.prevent="endForward"
+              @pointerleave="endForward"
+              @pointercancel="endForward"
+              @contextmenu.prevent
+            />
+
+            <p class="motion-helper adaptive-walk-helper">
+              離す、画面を切り替える、通信が450 ms途切れる、IMUが古い、または傾斜が12°を超えると
+              目標更新を停止し、最後の姿勢を保持します。単独の姿勢安定化はOFFにしてください。
+            </p>
+          </div>
+
+          <div class="adaptive-walk-status">
+            <div class="motion-meta-row">
+              <Tag :severity="walkStatusSeverity" :value="walkStatusLabel" />
+              <Tag :severity="imuReady ? 'success' : 'danger'" :value="imuReady ? 'IMU READY' : 'IMU NOT READY'" />
+              <Tag severity="info" :value="`振幅 ${((store.adaptiveWalk?.motion_scale ?? 0) * 100).toFixed(0)}%`" />
+            </div>
+            <dl class="adaptive-walk-metrics">
+              <div>
+                <dt>Roll / Pitch</dt>
+                <dd>{{ (store.adaptiveWalk?.roll_deg ?? 0).toFixed(2) }}° / {{ (store.adaptiveWalk?.pitch_deg ?? 0).toFixed(2) }}°</dd>
+              </div>
+              <div>
+                <dt>学習トリム</dt>
+                <dd>{{ (store.adaptiveWalk?.roll_trim ?? 0).toFixed(1) }} / {{ (store.adaptiveWalk?.pitch_trim ?? 0).toFixed(1) }}</dd>
+              </div>
+              <div>
+                <dt>歩行位相</dt>
+                <dd>{{ ((store.adaptiveWalk?.phase ?? 0) * 100).toFixed(0) }}%</dd>
+              </div>
+            </dl>
+            <p v-if="store.adaptiveWalk?.stopped_reason" class="adaptive-walk-stop-reason">
+              停止理由: {{ store.adaptiveWalk.stopped_reason }}
+            </p>
+          </div>
+        </div>
+      </template>
+    </Card>
+
     <div class="motion-grid">
       <Card class="motion-card">
         <template #title>Motion Library</template>

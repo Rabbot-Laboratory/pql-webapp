@@ -7,6 +7,15 @@ export type MotionCategory = 'fixed' | 'custom';
 export type PlaybackAdvanceMode = 'time' | 'guarded';
 export type TelemetryRecordingScope = 'all' | 'selected';
 export type SensorConnectionState = 'disabled' | 'connecting' | 'connected' | 'error';
+export type GamepadSource = 'none' | 'local' | 'web';
+export type HardwareConnectionState =
+  | 'disabled'
+  | 'connecting'
+  | 'connected'
+  | 'missing'
+  | 'error'
+  | 'stale'
+  | 'emulated';
 
 export interface SystemStatus {
   connection_state: ConnectionState;
@@ -172,6 +181,45 @@ export interface SensorState {
   updated_at: string;
 }
 
+export interface GamepadState {
+  source: GamepadSource;
+  connected: boolean;
+  stale: boolean;
+  device_name: string | null;
+  mapping: string | null;
+  axes: Record<string, number>;
+  buttons: Record<string, boolean>;
+  raw_axes: Record<string, number>;
+  raw_buttons: Record<string, number>;
+  deadman: boolean;
+  updated_at: string;
+}
+
+export interface AdaptiveWalkState {
+  active: boolean;
+  auto_stopped: boolean;
+  stopped_reason: string | null;
+  phase: number;
+  roll_deg: number;
+  pitch_deg: number;
+  imu_stale: boolean;
+  motion_scale: number;
+  lease_remaining_ms: number;
+  roll_trim: number;
+  pitch_trim: number;
+  learned_phase_lead_s: number[];
+  updated_at: string;
+}
+
+export interface WebGamepadUpdate {
+  connected: boolean;
+  id: string;
+  index: number;
+  mapping: string;
+  axes: number[];
+  buttons: number[];
+}
+
 export interface JointPreview {
   actuator_id: number;
   label: string;
@@ -203,6 +251,29 @@ export interface HealthResponse {
   ok: boolean;
   service: string;
   system: SystemStatus;
+  robot_ready: boolean;
+}
+
+export interface HardwareDeviceStatus {
+  device_id: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  enabled: boolean;
+  connection_state: HardwareConnectionState;
+  detail: string | null;
+  path: string | null;
+  last_seen_at: string | null;
+  updated_at: string;
+}
+
+export interface HardwareStatus {
+  server_ok: boolean;
+  robot_ready: boolean;
+  required_connected: number;
+  required_total: number;
+  devices: HardwareDeviceStatus[];
+  updated_at: string;
 }
 
 export interface MotionLibraryItem {

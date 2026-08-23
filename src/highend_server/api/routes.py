@@ -1,22 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from highend_server.api.dependencies import (
+    get_adaptive_walking_controller,
     get_control_service,
     get_experiment_recorder,
+    get_gamepad_service,
+    get_hardware_status_service,
     get_sensor_service,
     get_stabilization_controller,
 )
+from highend_server.application.adaptive_walking import AdaptiveWalkingController
 from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import (
     ExperimentAlreadyRunningError,
     ExperimentNotRunningError,
     ExperimentRecorder,
 )
+from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
 from highend_server.domain.models import (
+    AdaptiveWalkRequest,
+    AdaptiveWalkState,
     CaptureRequest,
-    ConnectionState,
     CsvPlaybackRequest,
     ExperimentManifest,
     ExperimentNoteRequest,
@@ -24,6 +32,7 @@ from highend_server.domain.models import (
     ExperimentSummary,
     FixedMotionRequest,
     HealthResponse,
+    HomePoseRequest,
     ImportLegacyCsvRequest,
     ImuCalibrationRequest,
     LegId,
@@ -35,7 +44,9 @@ from highend_server.domain.models import (
     StabilizationState,
     StartTelemetryRecordingRequest,
     TelemetryRecordingStatus,
+    WebGamepadUpdate,
 )
+from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
 
 router = APIRouter()
@@ -60,12 +71,16 @@ def _ensure_stabilization_idle(controller: StabilizationController) -> None:
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health(service: ControlService = Depends(get_control_service)) -> HealthResponse:
+async def health(
+    service: ControlService = Depends(get_control_service),
+    hardware: HardwareStatusService = Depends(get_hardware_status_service),
+) -> HealthResponse:
     status = service.system_status
     return HealthResponse(
-        ok=status.connection_state is ConnectionState.CONNECTED,
+        ok=True,
         service="highend-control-server",
         system=status,
+        robot_ready=hardware.state.robot_ready,
     )
 
 
@@ -76,6 +91,18 @@ async def list_actuators(service: ControlService = Depends(get_control_service))
 
 @router.get("/sensors")
 async def get_sensors(service: SensorService = Depends(get_sensor_service)) -> dict:
+    return {"item": service.state.model_dump(mode="json")}
+
+
+@router.get("/gamepad")
+async def get_gamepad(service: GamepadService = Depends(get_gamepad_service)) -> dict:
+    return {"item": service.state.model_dump(mode="json")}
+
+
+@router.get("/hardware")
+async def get_hardware_status(
+    service: HardwareStatusService = Depends(get_hardware_status_service),
+) -> dict:
     return {"item": service.state.model_dump(mode="json")}
 
 
@@ -180,9 +207,58 @@ async def get_stabilization(
 @router.post("/control/stabilization", response_model=StabilizationState)
 async def set_stabilization(
     request: StabilizationRequest,
+    http_request: Request,
     controller: StabilizationController = Depends(get_stabilization_controller),
 ) -> StabilizationState:
+    walking = getattr(http_request.app.state, "adaptive_walking_controller", None)
+    if request.enabled is True and walking is not None and walking.active:
+        raise HTTPException(
+            status_code=409,
+            detail="adaptive walking active — release Forward before standalone stabilization",
+        )
     return await controller.apply_request(request)
+
+
+@router.get("/control/adaptive-walk", response_model=AdaptiveWalkState)
+async def get_adaptive_walk(
+    controller: AdaptiveWalkingController = Depends(get_adaptive_walking_controller),
+) -> AdaptiveWalkState:
+    return controller.get_state()
+
+
+@router.post("/control/adaptive-walk/forward", response_model=AdaptiveWalkState)
+async def set_adaptive_walk_forward(
+    request: AdaptiveWalkRequest,
+    controller: AdaptiveWalkingController = Depends(get_adaptive_walking_controller),
+) -> AdaptiveWalkState:
+    try:
+        return await controller.set_forward_pressed(
+            request.pressed,
+            safety_confirmed=request.safety_confirmed,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/control/home")
+async def move_to_home(
+    request: HomePoseRequest,
+    service: ControlService = Depends(get_control_service),
+    stabilization: StabilizationController = Depends(get_stabilization_controller),
+) -> dict:
+    if not request.safety_confirmed:
+        raise HTTPException(status_code=400, detail="safety confirmation is required")
+    if stabilization.enabled or stabilization.active:
+        raise HTTPException(status_code=409, detail="disable stabilization before Home")
+    try:
+        await service.start_home_motion()
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"ok": True}
 
 
 @router.get("/actuators/{actuator_id}")
@@ -212,7 +288,10 @@ async def set_target(
     service: ControlService = Depends(get_control_service),
 ) -> dict:
     _validate_actuator_id(service, actuator_id)
-    item = await service.set_target(actuator_id, request)
+    try:
+        item = await service.set_target(actuator_id, request)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return {"item": item.model_dump(mode="json")}
 
 
@@ -329,7 +408,10 @@ async def start_csv_playback(
     request: CsvPlaybackRequest,
     service: ControlService = Depends(get_control_service),
 ) -> dict:
-    await service.start_csv_playback(request)
+    try:
+        await service.start_csv_playback(request)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return {"ok": True}
 
 
@@ -432,6 +514,15 @@ async def latest_experiment(
 async def websocket_stream(websocket: WebSocket) -> None:
     manager = websocket.app.state.websocket_manager
     service: ControlService = websocket.app.state.control_service
+    gamepad_service: GamepadService | None = getattr(
+        websocket.app.state, "gamepad_service", None
+    )
+    hardware_status_service: HardwareStatusService | None = getattr(
+        websocket.app.state, "hardware_status_service", None
+    )
+    adaptive_walking_controller: AdaptiveWalkingController | None = getattr(
+        websocket.app.state, "adaptive_walking_controller", None
+    )
     await manager.connect(websocket)
     try:
         await websocket.send_json(
@@ -452,10 +543,40 @@ async def websocket_stream(websocket: WebSocket) -> None:
                             mode="json"
                         )
                     ),
+                    "adaptive_walk": (
+                        adaptive_walking_controller.get_state().model_dump(mode="json")
+                        if adaptive_walking_controller is not None
+                        else None
+                    ),
+                    "gamepad": (
+                        gamepad_service.state.model_dump(mode="json")
+                        if gamepad_service is not None
+                        else None
+                    ),
+                    "hardware": (
+                        hardware_status_service.state.model_dump(mode="json")
+                        if hardware_status_service is not None
+                        else None
+                    ),
                 },
             }
         )
         while True:
-            await websocket.receive_text()
+            raw_message = await websocket.receive_text()
+            try:
+                message = json.loads(raw_message)
+            except json.JSONDecodeError:
+                # Preserve the old behavior for plain-text client keepalives.
+                continue
+            if (
+                gamepad_service is not None
+                and isinstance(message, dict)
+                and message.get("type") == "gamepad_input"
+            ):
+                try:
+                    update = WebGamepadUpdate.model_validate(message.get("payload") or {})
+                except ValueError:
+                    continue
+                await gamepad_service.update_web(update)
     except WebSocketDisconnect:
         await manager.disconnect(websocket)

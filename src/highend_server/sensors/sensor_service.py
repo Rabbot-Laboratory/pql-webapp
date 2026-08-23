@@ -27,7 +27,11 @@ from highend_server.domain.models import (
     SensorState,
     TelemetryEvent,
 )
-from highend_server.sensors.adc_mcp3204 import Mcp3204Reader
+from highend_server.sensors.adc_mcp3208 import (
+    MCP3208_ADC_DIVISOR,
+    MCP3208_CHANNEL_COUNT,
+    Mcp3208Reader,
+)
 from highend_server.sensors.attitude import (
     DEG_TO_RAD,
     RAD_TO_DEG,
@@ -224,10 +228,11 @@ class EmulatedImuSource:
         q = euler_to_quat(sample.roll_deg, sample.pitch_deg, sample.yaw_deg)
 
         gravity = gravity_from_quat(q)
+        ripple = sample.baseline_accel_scale
         accel = Vector3(
-            x=gravity.x + 0.015 * sin(elapsed * 4.2) + sample.accel_extra_g.x,
-            y=gravity.y + 0.012 * sin(elapsed * 3.1) + sample.accel_extra_g.y,
-            z=gravity.z + 0.01 * sin(elapsed * 2.3) + sample.accel_extra_g.z,
+            x=gravity.x + ripple * 0.015 * sin(elapsed * 4.2) + sample.accel_extra_g.x,
+            y=gravity.y + ripple * 0.012 * sin(elapsed * 3.1) + sample.accel_extra_g.y,
+            z=gravity.z + ripple * 0.01 * sin(elapsed * 2.3) + sample.accel_extra_g.z,
         )
 
         world_mag = Vector3(22.0, 0.0, -40.0)
@@ -490,7 +495,7 @@ class SensorService:
         self._task: asyncio.Task[None] | None = None
         self._imu_source: ImuSource | None = None
         self._pipeline: ImuPipeline | None = None
-        self._adc_readers: list[tuple[int, Mcp3204Reader]] = []
+        self._adc_readers: list[tuple[int, Mcp3208Reader]] = []
         self._imu_calibration = self._load_imu_calibration()
         # Serializes all calibration-mutating coroutines so overlapping requests
         # (level / gyro-zero / reset / mag start-finish-cancel) can't interleave
@@ -768,7 +773,7 @@ class SensorService:
         if self._use_emulated_sensors:
             return
         for bank_index, device in enumerate(self._adc_devices()):
-            reader = Mcp3204Reader(
+            reader = Mcp3208Reader(
                 bus=self.settings.adc_spi_bus,
                 device=device,
                 vref=self.settings.adc_vref,
@@ -782,7 +787,7 @@ class SensorService:
                     timeout=self._device_open_timeout_sec,
                 )
             except Exception as exc:
-                logger.exception("MCP3204 initialization failed on SPI device %s", device)
+                logger.exception("MCP3208 initialization failed on SPI device %s", device)
                 try:
                     # Timeout-bounded for the same reason as the IMU fallback
                     # close: never let cleanup of a wedged device hang startup.
@@ -791,7 +796,7 @@ class SensorService:
                         timeout=self._device_open_timeout_sec,
                     )
                 except Exception:
-                    logger.exception("MCP3204 close failed or timed out after init error")
+                    logger.exception("MCP3208 close failed or timed out after init error")
                 if bank_index < len(self._adc_banks):
                     self._adc_banks[bank_index].connection_state = SensorConnectionState.ERROR
                     self._adc_banks[bank_index].error = str(exc) or repr(exc)
@@ -874,7 +879,7 @@ class SensorService:
                     error=str(exc),
                     channels=[
                         AdcChannelState(bank=bank_index, channel=channel)
-                        for channel in range(4)
+                        for channel in range(MCP3208_CHANNEL_COUNT)
                     ],
                     updated_at=now,
                 )
@@ -886,7 +891,7 @@ class SensorService:
         adc_banks: list[AdcBankState] = []
         for bank_index, device in enumerate(self._adc_devices()):
             channels: list[AdcChannelState] = []
-            for channel in range(4):
+            for channel in range(MCP3208_CHANNEL_COUNT):
                 phase = elapsed * (0.45 + channel * 0.08) + bank_index * pi * 0.5 + channel
                 raw = int(max(0, min(4095, 1900 + 850 * sin(phase) + 180 * sin(phase * 2.7))))
                 channels.append(
@@ -894,7 +899,7 @@ class SensorService:
                         bank=bank_index,
                         channel=channel,
                         raw=raw,
-                        voltage=(raw / 4095.0) * self.settings.adc_vref,
+                        voltage=(raw / MCP3208_ADC_DIVISOR) * self.settings.adc_vref,
                     )
                 )
             adc_banks.append(
@@ -996,7 +1001,7 @@ class SensorService:
                 device=device,
                 channels=[
                     AdcChannelState(bank=bank_index, channel=channel)
-                    for channel in range(4)
+                    for channel in range(MCP3208_CHANNEL_COUNT)
                 ],
             )
             for bank_index, device in enumerate(self._adc_devices())

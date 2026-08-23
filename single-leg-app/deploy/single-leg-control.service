@@ -1,0 +1,25 @@
+[Unit]
+Description=Single Leg Control Server
+Wants=network-online.target
+After=network-online.target tailscaled.service
+Conflicts=highend-control.service
+
+[Service]
+Type=simple
+User=rabbot
+Group=rabbot
+SupplementaryGroups=dialout
+WorkingDirectory=/home/rabbot/pql-single-leg/single-leg-app
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/rabbot/pql-single-leg/single-leg-app/.env
+ExecStart=/home/rabbot/pql-single-leg/.venv/bin/python -m single_leg_server
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/rabbot/pql-single-leg
+
+[Install]
+WantedBy=multi-user.target

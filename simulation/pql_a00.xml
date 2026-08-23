@@ -1,0 +1,159 @@
+<mujoco model="PQL-A00 pneumatic quadruped">
+  <compiler angle="radian" meshdir="../pql-a00_description/meshes" autolimits="true"/>
+  <option timestep="0.002" integrator="implicitfast" cone="elliptic" gravity="0 0 -9.81">
+    <flag multiccd="enable"/>
+  </option>
+
+  <visual>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.3 0.3 0.3" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="135" elevation="-20"/>
+  </visual>
+
+  <default>
+    <joint limited="true" damping="1.2" armature="0.015" frictionloss="0.1"/>
+    <geom solref="0.008 1" solimp="0.9 0.95 0.002"/>
+    <default class="visual">
+      <geom type="mesh" contype="0" conaffinity="0" group="2" rgba="0.72 0.76 0.82 1"/>
+    </default>
+    <default class="robot_collision">
+      <!-- Collision bit 2 only talks to the floor's bit 1, avoiding unstable self-contact. -->
+      <geom contype="2" conaffinity="1" group="3" rgba="0.2 0.65 0.9 0.12" friction="1.1 0.02 0.002"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.15 0.25 0.35" rgb2="0.02 0.03 0.05" width="512" height="3072"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.18 0.18 0.2" rgb2="0.28 0.28 0.3" width="512" height="512"/>
+    <material name="floor" texture="grid" texrepeat="4 4" reflectance="0.12"/>
+    <material name="frame" rgba="0.30 0.34 0.40 1" metallic="0.25" roughness="0.55"/>
+    <material name="leg_fr" rgba="0.95 0.35 0.25 1"/>
+    <material name="leg_fl" rgba="0.20 0.65 0.95 1"/>
+    <material name="leg_rr" rgba="0.95 0.72 0.18 1"/>
+    <material name="leg_rl" rgba="0.30 0.80 0.45 1"/>
+
+    <mesh name="fr_shoulder_mesh" file="PQL-LF00-FR_v2_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="fr_upper_mesh" file="PQL01-LU00-A1-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="fr_lower_mesh" file="PQL-LD00-FR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="fl_shoulder_mesh" file="PQL-LF00-FL_v2_2.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="fl_upper_mesh" file="PQL01-LU00-A1-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="fl_lower_mesh" file="PQL-LD00-FL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rr_shoulder_mesh" file="PQL-LF00-FL_v2_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rr_upper_mesh" file="PQL01-LU00-A1-RR_v1_2.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rr_lower_mesh" file="PQL-LD00-RR_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rl_shoulder_mesh" file="PQL-LF00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rl_upper_mesh" file="PQL01-LU00-A1-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="rl_lower_mesh" file="PQL-LD00-RL_v1_1.stl" scale="0.001 0.001 0.001"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 -1 2.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor" contype="1" conaffinity="2" friction="1.2 0.02 0.002"/>
+    <body name="base" pos="0 0 0.27">
+      <freejoint name="root"/>
+      <inertial pos="0.000666 0.044907 0.044986" mass="11.0620" fullinertia="0.251535 0.070655 0.256263 0.004060 0.004428 -0.028747"/>
+      <!-- The CAD base STL has 336k faces (over MuJoCo's 200k/STL decoder limit).
+           Two boxes retain its measured envelope; all articulated leg STLs remain exact. -->
+      <geom class="visual" type="box" pos="0 0.055 0.060" size="0.145 0.285 0.060" material="frame"/>
+      <geom class="visual" type="box" pos="0 0.060 0.145" size="0.115 0.220 0.035" material="frame"/>
+      <geom name="base_collision" class="robot_collision" type="box" pos="0 0.055 0.06" size="0.14 0.285 0.08"/>
+      <site name="imu_site" pos="0.000666 0.044907 0.044986" size="0.008" rgba="0.2 1 0.9 1"/>
+
+      <!-- Front-right. The first CAD joint is mechanically fixed; the two cylinders drive hip/knee. -->
+      <body name="fr_shoulder" pos="-0.1308 -0.168616 0.128684">
+        <inertial pos="-0.040160 -0.005666 -0.004426" mass="0.537804" diaginertia="0.001884 0.000624 0.002097"/>
+        <geom class="visual" mesh="fr_shoulder_mesh" pos="0.1308 0.168616 -0.128684" material="leg_fr"/>
+        <body name="fr_upper" pos="-0.067 -0.1 -0.017">
+          <joint name="rev_fr2" axis="1 0 0" range="-0.31 0.31"/>
+          <inertial pos="0.013339 0.085887 -0.097995" mass="0.466602" diaginertia="0.003413 0.001992 0.001598"/>
+          <geom class="visual" mesh="fr_upper_mesh" pos="0.1978 0.268616 -0.111684" material="leg_fr"/>
+          <geom class="robot_collision" type="capsule" fromto="0 0 0 0.007 0.16027 -0.19834" size="0.025"/>
+          <body name="fr_lower" pos="0.007 0.16027 -0.19834">
+            <joint name="rev_fr3" axis="1 0 0" range="-0.48 0.48"/>
+            <inertial pos="0.008580 -0.069884 -0.053875" mass="0.103415" diaginertia="0.000836 0.000349 0.000503"/>
+            <geom class="visual" mesh="fr_lower_mesh" pos="0.1908 0.108346 0.086656" material="leg_fr"/>
+            <geom class="robot_collision" type="capsule" fromto="0 0 0 0.010 -0.1707 -0.1233" size="0.018"/>
+            <geom name="fr_foot" class="robot_collision" type="sphere" pos="0.010 -0.1707 -0.1483" size="0.025" friction="1.4 0.03 0.003"/>
+            <site name="fr_foot_site" pos="0.010 -0.1707 -0.1733" size="0.008" rgba="1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="fl_shoulder" pos="0.1308 -0.134616 0.128684">
+        <inertial pos="0.040154 -0.039666 -0.004489" mass="0.537807" diaginertia="0.001884 0.000624 0.002097"/>
+        <geom class="visual" mesh="fl_shoulder_mesh" pos="-0.1308 0.134616 -0.128684" material="leg_fl"/>
+        <body name="fl_upper" pos="0.066974 -0.134 -0.017103">
+          <joint name="rev_fl2" axis="0.999999 0 -0.001546" range="-0.31 0.31"/>
+          <inertial pos="-0.013499 0.079757 -0.103025" mass="0.466602" diaginertia="0.003413 0.002187 0.001402"/>
+          <geom class="visual" mesh="fl_upper_mesh" pos="-0.197774 0.268616 -0.111581" material="leg_fl"/>
+          <geom class="robot_collision" type="capsule" fromto="0 0 0 -0.007322 0.147888 -0.207725" size="0.025"/>
+          <body name="fl_lower" pos="-0.007322 0.147888 -0.207725">
+            <joint name="rev_fl3" axis="0.999999 0 -0.001546" range="-0.48 0.48"/>
+            <inertial pos="-0.008657 -0.073036 -0.049504" mass="0.103415" diaginertia="0.000836 0.000301 0.000551"/>
+            <geom class="visual" mesh="fl_lower_mesh" pos="-0.190452 0.120728 0.096144" material="leg_fl"/>
+            <geom class="robot_collision" type="capsule" fromto="0 0 0 -0.010 -0.1783 -0.1139" size="0.018"/>
+            <geom name="fl_foot" class="robot_collision" type="sphere" pos="-0.010 -0.1783 -0.1389" size="0.025" friction="1.4 0.03 0.003"/>
+            <site name="fl_foot_site" pos="-0.010 -0.1783 -0.1639" size="0.008" rgba="0.1 0.6 1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="rr_shoulder" pos="-0.1233 0.121384 0.128684">
+        <inertial pos="-0.040171 0.039667 -0.004327" mass="0.537807" diaginertia="0.001884 0.000624 0.002097"/>
+        <geom class="visual" mesh="rr_shoulder_mesh" pos="0.1233 -0.121384 -0.128684" material="leg_rr"/>
+        <body name="rr_upper" pos="-0.067042 0.134001 -0.016833">
+          <joint name="rev_rr2" axis="-0.999997 0 0.002481" range="-0.31 0.31"/>
+          <inertial pos="0.013066 -0.069615 -0.110185" mass="0.466602" diaginertia="0.003413 0.002480 0.001110"/>
+          <geom class="visual" mesh="rr_upper_mesh" pos="0.190342 -0.255385 -0.111851" material="leg_rr"/>
+          <geom class="robot_collision" type="capsule" fromto="0 0 0 0.026452 -0.1275 -0.220903" size="0.025"/>
+          <body name="rr_lower" pos="0.026452 -0.1275 -0.220903">
+            <joint name="rev_rr3" axis="-0.999997 0 0.002481" range="-0.48 0.48"/>
+            <inertial pos="-0.011324 0.077406 -0.042333" mass="0.103415" diaginertia="0.000836 0.000230 0.000622"/>
+            <geom class="visual" mesh="rr_lower_mesh" pos="0.16389 -0.127885 0.109052" material="leg_rr"/>
+            <geom class="robot_collision" type="capsule" fromto="0 0 0 -0.010 0.1894 -0.1009" size="0.018"/>
+            <geom name="rr_foot" class="robot_collision" type="sphere" pos="-0.010 0.1894 -0.1259" size="0.025" friction="1.4 0.03 0.003"/>
+            <site name="rr_foot_site" pos="-0.010 0.1894 -0.1509" size="0.008" rgba="1 0.75 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="rl_shoulder" pos="0.1308 0.155384 0.128684">
+        <inertial pos="0.040160 0.005667 -0.004426" mass="0.537804" diaginertia="0.001884 0.000624 0.002097"/>
+        <geom class="visual" mesh="rl_shoulder_mesh" pos="-0.1308 -0.155384 -0.128684" material="leg_rl"/>
+        <body name="rl_upper" pos="0.067 0.100001 -0.017">
+          <joint name="rev_rl2" axis="-1 0 0" range="-0.31 0.31"/>
+          <inertial pos="-0.013339 -0.095752 -0.088380" mass="0.466602" diaginertia="0.003413 0.001647 0.001942"/>
+          <geom class="visual" mesh="rl_upper_mesh" pos="-0.1978 -0.255385 -0.111684" material="leg_rl"/>
+          <geom class="robot_collision" type="capsule" fromto="0 0 0 -0.007 -0.180313 -0.180312" size="0.025"/>
+          <body name="rl_lower" pos="-0.007 -0.180313 -0.180312">
+            <joint name="rev_rl3" axis="-1 0 0" range="-0.48 0.48"/>
+            <inertial pos="-0.008580 0.054339 -0.069524" mass="0.103415" diaginertia="0.000836 0.000551 0.000301"/>
+            <geom class="visual" mesh="rl_lower_mesh" pos="-0.1908 -0.075072 0.068628" material="leg_rl"/>
+            <geom class="robot_collision" type="capsule" fromto="0 0 0 -0.010 0.1313 -0.1414" size="0.018"/>
+            <geom name="rl_foot" class="robot_collision" type="sphere" pos="-0.010 0.1313 -0.1664" size="0.025" friction="1.4 0.03 0.003"/>
+            <site name="rl_foot_site" pos="-0.010 0.1313 -0.1914" size="0.008" rgba="0.1 1 0.4 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="motor_fr_hip" joint="rev_fr2" ctrlrange="-35 35"/>
+    <motor name="motor_fr_knee" joint="rev_fr3" ctrlrange="-35 35"/>
+    <motor name="motor_fl_hip" joint="rev_fl2" ctrlrange="-35 35"/>
+    <motor name="motor_fl_knee" joint="rev_fl3" ctrlrange="-35 35"/>
+    <motor name="motor_rr_hip" joint="rev_rr2" ctrlrange="-35 35"/>
+    <motor name="motor_rr_knee" joint="rev_rr3" ctrlrange="-35 35"/>
+    <motor name="motor_rl_hip" joint="rev_rl2" ctrlrange="-35 35"/>
+    <motor name="motor_rl_knee" joint="rev_rl3" ctrlrange="-35 35"/>
+  </actuator>
+
+  <sensor>
+    <framequat name="imu_quat" objtype="site" objname="imu_site"/>
+    <gyro name="imu_gyro" site="imu_site"/>
+    <accelerometer name="imu_accel" site="imu_site"/>
+    <framepos name="base_pos" objtype="body" objname="base"/>
+    <subtreecom name="robot_com" body="base"/>
+  </sensor>
+</mujoco>

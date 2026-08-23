@@ -113,10 +113,10 @@ I2C addresses are:
 - Gyroscope: `0x68`
 - Magnetometer: `0x10`
 
-For two MCP3204 ADCs on SPI0 CE0 and CE1, the default SPI devices are:
+The installation sensors use one 5 V MCP3208 on SPI0 CE0. A TXU0304 level
+shifter translates the Raspberry Pi's 3.3 V SPI logic to the ADC's 5 V logic:
 
-- `/dev/spidev0.0`
-- `/dev/spidev0.1`
+- `/dev/spidev0.0` (channels 0 through 7)
 
 Enable sensor polling:
 
@@ -129,6 +129,18 @@ The sensor state is exposed through:
 
 - `GET /api/sensors`
 - WebSocket `sensor_state` events
+
+Required hardware is also summarized without making server startup depend on
+device presence:
+
+- `GET /api/hardware`
+- WebSocket `hardware_status` events
+- `GET /api/health` keeps `ok=true` while the API is running and reports
+  physical readiness separately as `robot_ready`
+
+The WebUI shows a dismissible warning for missing Front/Back ESP32, BMX055, or
+MCP3208 devices. Closing it leaves a small warning chip, and serial ports keep
+retrying in the background. The F710 is optional and does not create a warning.
 
 IMU calibration endpoints:
 
@@ -154,14 +166,48 @@ Useful environment overrides:
 - `HIGHEND_BMX055_GYRO_ADDRESS=104`
 - `HIGHEND_BMX055_MAG_ADDRESS=16`
 - `HIGHEND_ADC_SPI_BUS=0`
-- `HIGHEND_ADC_SPI_DEVICES=0,1`
-- `HIGHEND_ADC_VREF=3.3`
+- `HIGHEND_ADC_SPI_DEVICES=0`
+- `HIGHEND_ADC_VREF=5.0`
 
 Then open the browser dashboard:
 
 ```text
 http://<raspberry-pi-host>:8000/
 ```
+
+### Logitech F710 input observation
+
+The UI supports both controller paths through one `GamepadState` model:
+
+- F710 USB receiver connected to the Raspberry Pi (`evdev`)
+- F710 connected to the browser PC (browser Gamepad API over WebSocket)
+
+Both paths are **observation and experiment logging only**. They are not wired
+to actuator commands. The provisional deadman input is LB and must be verified
+on the physical controller before any future command mapping is enabled.
+
+For the recommended Pi-local path, install the `pi-sensors` extras and start the
+server with local gamepad input explicitly enabled:
+
+```bash
+python -m pip install -e '.[pi-sensors]'
+HIGHEND_GAMEPAD_LOCAL_ENABLED=true python -m highend_server
+```
+
+Useful checks and overrides:
+
+```bash
+ls -l /dev/input/event*
+python -c "from evdev import InputDevice, list_devices; print([(p, InputDevice(p).name) for p in list_devices()])"
+
+# Optional if automatic F710 name matching is not sufficient:
+HIGHEND_GAMEPAD_DEVICE_PATH=/dev/input/event3
+HIGHEND_GAMEPAD_NAME_MATCH=F710
+```
+
+Open the **Controller** tab to inspect normalized axes, buttons, source,
+staleness, and deadman state. For the PC path, click **Enable browser input**
+and then press a controller button so the browser exposes the device.
 
 ### IMU attitude stabilization
 
@@ -187,6 +233,47 @@ default** and never auto-enables on boot.
 See `docs/imu_stabilization_guide.md` (Japanese) for the full operator guide,
 including the on-robot axis-sign verification checklist that must be run once
 before trusting the corrections on real hardware.
+
+## MuJoCo walking simulation
+
+The CAD-derived quadruped can be run with per-cylinder pneumatic lag, asymmetric
+extension/retraction speeds, bounded online adaptive phase compensation, and
+IMU-driven adaptive body-level gait trim. Foot-contact sensing is not required.
+
+```powershell
+python -m pip install -e ".[simulation,dev]"
+python scripts\run_simulation.py --duration 12
+```
+
+For a repeatable headless run with telemetry:
+
+```powershell
+python scripts\run_simulation.py --headless --duration 12 --log Logs\simulation\crawl.csv
+```
+
+Disable only the IMU feedback for an A/B comparison with the same gait:
+
+```powershell
+python scripts\run_simulation.py --headless --duration 12 --no-imu-control
+```
+
+See `docs/walking_simulation_guide.md` for model assumptions, parameter
+identification, comparison without adaptation, and the hardware transfer flow.
+
+## Hardware IMU-adaptive walking
+
+The simulation control law is also available as an isolated real-hardware
+target generator. The Motion page has a press-and-hold **Forward** button that
+runs the existing crawl motion at 20% amplitude while learning per-cylinder
+phase lead and applying bounded IMU Roll/Pitch trim. It does not use contact
+sensors.
+
+The server requires fresh IMU data and all eight actuator telemetry channels,
+keeps this mode exclusive from manual/CSV/stabilization control, and stops
+target updates on button/network lease loss, stale IMU, excessive tilt, or
+serial failure. Stopping holds the last commanded posture; a physical air
+cutoff remains mandatory. See `docs/adaptive_walking_hardware_guide.md` for the
+supported low-pressure first-run procedure and tuning parameters.
 
 ## Vue UI scaffold
 

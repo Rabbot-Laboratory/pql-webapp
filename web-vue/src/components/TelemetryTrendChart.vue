@@ -17,7 +17,6 @@ type SeriesKey =
   | 'position'
   | 'voltage'
   | 'command'
-  | 'pressure'
   | 'targetPosition'
   | 'targetCommand';
 
@@ -25,7 +24,6 @@ const legendItems: Array<{ key: SeriesKey; label: string; color: string; dashed?
   { key: 'position', label: 'Position', color: '#d44d2a' },
   { key: 'voltage', label: 'Voltage', color: '#1f7a8c' },
   { key: 'command', label: 'Command', color: '#2b9348' },
-  { key: 'pressure', label: 'Pressure', color: '#8a5cf6' },
   { key: 'targetPosition', label: 'Target Position', color: '#ff9966', dashed: true },
   { key: 'targetCommand', label: 'Target Command', color: '#90be6d', dashed: true },
 ];
@@ -34,7 +32,6 @@ const visibleSeries = reactive<Record<SeriesKey, boolean>>({
   position: true,
   voltage: true,
   command: true,
-  pressure: true,
   targetPosition: true,
   targetCommand: true,
 });
@@ -64,7 +61,6 @@ const points = computed(() => ({
   position: toPolyline(props.samples.map((sample) => sample.position)),
   voltage: toPolyline(props.samples.map((sample) => sample.voltage)),
   command: toPolyline(props.samples.map((sample) => sample.command)),
-  pressure: toPolyline(props.samples.map((sample) => sample.pressure)),
   targetPosition: toPolyline(props.samples.map((sample) => sample.target_position)),
   targetCommand: toPolyline(props.samples.map((sample) => sample.target_command)),
 }));
@@ -117,7 +113,6 @@ function toggleSeries(key: SeriesKey): void {
       <polyline v-if="visibleSeries.position" :points="points.position" class="trend-line position" />
       <polyline v-if="visibleSeries.voltage" :points="points.voltage" class="trend-line voltage" />
       <polyline v-if="visibleSeries.command" :points="points.command" class="trend-line command" />
-      <polyline v-if="visibleSeries.pressure" :points="points.pressure" class="trend-line pressure" />
     </svg>
   </div>
 </template>

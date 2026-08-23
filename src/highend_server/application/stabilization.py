@@ -11,45 +11,39 @@ requires an explicit API call. Every safety mechanism the plan mandates lives
 here: correction clamp, output rate limiter, smooth ramp-to-zero on disable, and
 auto-disable on excessive tilt, stale attitude, or repeated serial failures.
 
-Coordinate / sign convention (single source of truth is
-``sensors/attitude.py``)
-=========================================================================
-IMU body frame: +X forward, +Y left, +Z up (right-handed).
+Coordinate / sign convention
+============================
+The IMU fuser exposes *raw sensor-frame* Euler angles.  The 2026-07-11 manual
+trial established the control-frame scalar convention used here:
 
-    * roll  > 0  => right side down   (rotation about body +X)
-    * pitch > 0  => nose up / front up (rotation about body +Y)
+    * right-side-down -> raw Roll negative -> control Roll positive;
+    * nose-up         -> raw Pitch positive -> control Pitch positive.
 
-Actuator <-> leg map (from ControlService labels, confirmed against the URDF
-joint origins in ``pql-a00_description``):
+``AttitudeControlFrame`` applies that level-corrected sign conversion.  It is
+intentionally not a claim about a complete 3D IMU mounting transform.
+
+Actuator <-> leg map is confirmed by the URDF joint origins:
 
     id 0,1 = Front-Right  (right, front)
     id 2,3 = Front-Left   (left,  front)
     id 4,5 = Rear-Right   (right, rear)
     id 6,7 = Rear-Left    (left,  rear)
 
-Correction sign convention: ``+correction`` *extends* that leg (raises that
-corner of the body); ``-correction`` retracts it (lowers that corner).
-Corrections are position-target offsets in the 0..4095 unit space.
+Increasing a position target is the confirmed pneumatic-cylinder extension
+direction.  The 3D model then determines whether that extension raises or
+lowers a particular foot: hip and knee target signs differ on several legs.
+``DEFAULT_MIXING_MATRIX`` is generated from these signed URDF foot-height
+effects; it is not the former "same sign for both joints" approximation.
 
 PID error is ``e = setpoint(0) - measured`` so:
 
     * right-side-down (roll>0)   -> e_roll  < 0 -> u_roll  < 0
     * nose-up        (pitch>0)   -> e_pitch < 0 -> u_pitch < 0
 
-To right the body we must EXTEND the low corners. The mixing matrix columns are
-therefore signed so that:
-
-    * a right-side-down tilt (u_roll<0) yields +correction (extend) on the RIGHT
-      legs and -correction (retract) on the LEFT legs
-      => right legs roll coeff = -1, left legs roll coeff = +1
-    * a nose-up tilt (u_pitch<0) yields +correction (extend) on the REAR legs and
-      -correction (retract) on the FRONT legs
-      => front legs pitch coeff = +1, rear legs pitch coeff = -1
-
-The default matrix below is a best-effort derivation. The true actuator sign
-depends on pneumatic plumbing that cannot be confirmed from code, so it is
-overridable via ``config/stabilization.json`` and must be verified on-robot
-(with tiny gains) before trusting the signs.
+For either axis, a negative PID output commands the model low corners upward
+and high corners downward.  Matrix magnitudes remain one because geometry-only
+height sensitivity is not a calibrated pneumatic gain, and no active control
+is enabled by this change.
 """
 
 from __future__ import annotations
@@ -65,7 +59,9 @@ from time import monotonic
 
 from pydantic import BaseModel, Field
 
+from highend_server.application.attitude_control_frame import AttitudeControlFrame
 from highend_server.application.control_service import ControlService
+from highend_server.application.pql_a00_kinematics import model_derived_mixing_matrix
 from highend_server.config import Settings
 from highend_server.domain.models import (
     StabilizationCorrection,
@@ -89,16 +85,7 @@ LevelOffsetsProvider = Callable[[], tuple[float, float]]
 MAX_CONSECUTIVE_STEP_FAILURES = 5
 
 # Columns are [roll, pitch]; rows are indexed by actuator id (see module docstring).
-DEFAULT_MIXING_MATRIX: list[list[float]] = [
-    [-1.0, +1.0],  # 0 Front-Right hip
-    [-1.0, +1.0],  # 1 Front-Right knee
-    [+1.0, +1.0],  # 2 Front-Left  hip
-    [+1.0, +1.0],  # 3 Front-Left  knee
-    [-1.0, -1.0],  # 4 Rear-Right  hip
-    [-1.0, -1.0],  # 5 Rear-Right  knee
-    [+1.0, -1.0],  # 6 Rear-Left   hip
-    [+1.0, -1.0],  # 7 Rear-Left   knee
-]
+DEFAULT_MIXING_MATRIX: list[list[float]] = model_derived_mixing_matrix()
 
 
 def _clamp(value: float, limit: float) -> float:
@@ -227,6 +214,10 @@ class StabilizationController:
         # process lifetime, matching how gains/mixing are loaded (a config
         # change requires a restart, same as other stabilization settings).
         self._derivative_source = settings.stabilization_derivative_source
+        self._attitude_frame = AttitudeControlFrame(
+            roll_sign=settings.stabilization_roll_sign,
+            pitch_sign=settings.stabilization_pitch_sign,
+        )
 
         self._max_correction = settings.stabilization_max_correction
         self._pid_roll = AxisPid(
@@ -491,31 +482,32 @@ class StabilizationController:
         active = self._enabled and not self._auto_disabled
 
         if active and snapshot is not None:
-            roll = snapshot.euler.roll_deg
-            pitch = snapshot.euler.pitch_deg
             offset_roll, offset_pitch = self._level_offsets_provider()
-            roll -= offset_roll
-            pitch -= offset_pitch
+            roll, pitch = self._attitude_frame.tilt(
+                raw_roll_deg=snapshot.euler.roll_deg,
+                raw_pitch_deg=snapshot.euler.pitch_deg,
+                level_roll_offset_deg=offset_roll,
+                level_pitch_offset_deg=offset_pitch,
+            )
             self._roll_deg = roll
             self._pitch_deg = pitch
             self._roll_error_deg = 0.0 - roll
             self._pitch_error_deg = 0.0 - pitch
 
-            # gyro_rate mode feeds the D-term straight from the bias-corrected
-            # gyro (roll rate = -gyro_x, pitch rate = -gyro_y — error = -attitude,
-            # so d(error)/dt = -d(attitude)/dt = -gyro; see module docstring for
-            # the body-frame sign convention) instead of finite-differencing the
-            # fused angle, which double-differentiates noise. Any non-finite
-            # gyro sample (e.g. the sensor-nan scenario) falls back to None
-            # (finite-difference) for that tick only — never let a NaN rate
-            # reach the PID output.
+            # gyro_rate mode feeds d(setpoint - control-frame attitude)/dt
+            # straight from the bias-corrected gyro. The trial-derived Roll /
+            # Pitch signs must be applied here too; otherwise only the P-term
+            # would be transformed and gyro-rate D would oppose it. Any
+            # non-finite sample falls back to finite difference for this tick.
             roll_rate: float | None = None
             pitch_rate: float | None = None
             if self._derivative_source == "gyro_rate":
                 gyro = snapshot.gyro_dps
                 if isfinite(gyro.x) and isfinite(gyro.y):
-                    roll_rate = -gyro.x
-                    pitch_rate = -gyro.y
+                    roll_rate, pitch_rate = self._attitude_frame.error_rates(
+                        gyro_x_dps=gyro.x,
+                        gyro_y_dps=gyro.y,
+                    )
 
             u_roll = self._pid_roll.step(self._roll_error_deg, dt, rate=roll_rate)
             u_pitch = self._pid_pitch.step(self._pitch_error_deg, dt, rate=pitch_rate)
@@ -570,8 +562,12 @@ class StabilizationController:
         if now - snapshot.timestamp > self.settings.stabilization_max_staleness_sec:
             return "attitude stale"
         offset_roll, offset_pitch = self._level_offsets_provider()
-        roll = snapshot.euler.roll_deg - offset_roll
-        pitch = snapshot.euler.pitch_deg - offset_pitch
+        roll, pitch = self._attitude_frame.tilt(
+            raw_roll_deg=snapshot.euler.roll_deg,
+            raw_pitch_deg=snapshot.euler.pitch_deg,
+            level_roll_offset_deg=offset_roll,
+            level_pitch_offset_deg=offset_pitch,
+        )
         # ``abs(NaN) > limit`` is False, so a NaN attitude would silently defeat
         # the tilt cutout. Reject non-finite angles explicitly (fail closed).
         if not isfinite(roll) or not isfinite(pitch):

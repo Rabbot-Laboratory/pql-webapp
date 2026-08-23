@@ -10,6 +10,7 @@ const props = defineProps<{
   system: SystemStatus | null;
   wsState: 'connecting' | 'live' | 'disconnected' | 'error';
   loading: boolean;
+  homeBusy: boolean;
   motionLibrary: MotionLibrarySnapshot;
 }>();
 
@@ -19,6 +20,7 @@ const emit = defineEmits<{
   fixedMotion: [motion: FixedMotion];
   playLibraryMotion: [category: MotionCategory, name: string];
   stopMotion: [];
+  home: [];
 }>();
 
 const isFullscreen = ref(false);
@@ -169,6 +171,17 @@ onUnmounted(() => {
 
     <template #center>
       <div class="motion-toolbar-center" role="group" aria-label="モーション操作">
+        <Button
+          label="Home"
+          icon="pi pi-home"
+          size="small"
+          rounded
+          severity="info"
+          :loading="homeBusy"
+          :disabled="homeBusy || loading || wsState !== 'live' || system?.connection_state !== 'connected' || playbackRunning"
+          title="全脚をhome.csvの安定姿勢へゆっくり移動"
+          @click="$emit('home')"
+        />
         <Button label="Crawl" size="small" text rounded @click="$emit('fixedMotion', 'crawl')" />
         <Button label="Trot" size="small" text rounded @click="$emit('fixedMotion', 'trot')" />
         <Button label="Pace" size="small" text rounded @click="$emit('fixedMotion', 'pace')" />

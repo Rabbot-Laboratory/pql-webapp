@@ -22,6 +22,16 @@ web-vue/src/highend_control_server.egg-info/
 # Node
 web-vue/node_modules/
 web-vue/dist/
+single-leg-app/web/node_modules/
+single-leg-app/web/dist/
+
+# Local reference material (large CAD/sample archives, not source)
+sankou/
+
+# Local demo/runtime logs
+*.err.log
+*.out.log
+single-leg-app/runtime-logs/
 
 # Logs
 Logs/

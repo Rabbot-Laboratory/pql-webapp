@@ -9,13 +9,16 @@ import TabPanel from 'primevue/tabpanel';
 import TabPanels from 'primevue/tabpanels';
 import Tabs from 'primevue/tabs';
 import Toast from 'primevue/toast';
+import { useConfirm } from 'primevue/useconfirm';
 import { useToast } from 'primevue/usetoast';
 
 import ActuatorControlPanel from '@/components/ActuatorControlPanel.vue';
 import ActuatorTable from '@/components/ActuatorTable.vue';
+import ContactSensorPanel from '@/components/ContactSensorPanel.vue';
 import FocusedLegView from '@/components/FocusedLegView.vue';
+import GamepadPanel from '@/components/GamepadPanel.vue';
+import HardwareNotice from '@/components/HardwareNotice.vue';
 import MotionControlPanel from '@/components/MotionControlPanel.vue';
-import PressureMonitorPanel from '@/components/PressureMonitorPanel.vue';
 import SensorCalibrationPanel from '@/components/SensorCalibrationPanel.vue';
 import StabilizationPanel from '@/components/StabilizationPanel.vue';
 import StatusToolbar from '@/components/StatusToolbar.vue';
@@ -31,6 +34,7 @@ import type {
 import { actuatorLabel } from '@/utils/i18n';
 
 const store = useControlStore();
+const confirm = useConfirm();
 const toast = useToast();
 const navOpen = ref(false);
 const isMobile = ref(false);
@@ -40,6 +44,7 @@ const stabilizationGainsBusy = ref(false);
 const stabilizationGainsError = ref(false);
 const magCalibrationBusy = ref(false);
 const magCalibrationQuality = ref<MagCalibrationQuality | null>(null);
+const homeBusy = ref(false);
 
 const tabOptions = computed(() =>
   isMobile.value
@@ -47,14 +52,16 @@ const tabOptions = computed(() =>
         { value: 'dashboard', label: '操作' },
         { value: 'legs', label: '脚' },
         { value: 'motion', label: '動作' },
-        { value: 'pressure', label: '圧力' },
+        { value: 'contacts', label: '接地' },
+        { value: 'controller', label: '操作入力' },
         { value: 'sensors', label: 'センサ・制御' },
       ]
     : [
         { value: 'dashboard', label: 'Dashboard' },
         { value: 'legs', label: 'Kinematics' },
         { value: 'motion', label: 'Motion' },
-        { value: 'pressure', label: 'Pressure' },
+        { value: 'contacts', label: 'Contact Sensors' },
+        { value: 'controller', label: 'Controller' },
         { value: 'sensors', label: 'Sensors & Control' },
       ],
 );
@@ -448,6 +455,45 @@ async function handleStopMotion(): Promise<void> {
   }
 }
 
+async function startHomeMotion(): Promise<void> {
+  homeBusy.value = true;
+  try {
+    await store.moveHome(true);
+    toast.add({
+      severity: 'info',
+      summary: 'Homeへ移動中',
+      detail: '全軸を最大150 unit/sで中立姿勢へ移動しています。',
+      life: 3000,
+    });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'Homeを開始できません',
+      detail: error instanceof Error ? error.message : '接続状態を確認してください。',
+      life: 3500,
+    });
+  } finally {
+    homeBusy.value = false;
+  }
+}
+
+function handleHomeMotion(): void {
+  confirm.require({
+    header: 'Home姿勢へ移動',
+    message:
+      '全脚を安定姿勢へゆっくり移動します。支持治具、周囲の安全、非常停止手段を確認しましたか？\n途中停止はヘッダのStopを押してください。',
+    icon: 'pi pi-exclamation-triangle',
+    modal: true,
+    blockScroll: true,
+    acceptLabel: 'Homeへ移動',
+    rejectLabel: 'キャンセル',
+    defaultFocus: 'reject',
+    acceptProps: { severity: 'info', icon: 'pi pi-home' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => void startHomeMotion(),
+  });
+}
+
 onMounted(async () => {
   syncViewportMode();
   window.addEventListener('resize', syncViewportMode);
@@ -478,13 +524,17 @@ onBeforeUnmount(() => {
       :system="store.system"
       :ws-state="store.wsState"
       :loading="store.loading"
+      :home-busy="homeBusy"
       :motion-library="store.motionLibrary"
       @refresh="refreshSnapshot"
       @toggle-nav="navOpen = true"
       @fixed-motion="handleFixedMotion"
       @play-library-motion="handleLibraryMotion"
       @stop-motion="handleStopMotion"
+      @home="handleHomeMotion"
     />
+
+    <HardwareNotice :hardware="store.hardware" />
 
     <Drawer v-model:visible="navOpen" header="Quick Guide" position="left" class="app-drawer">
       <div class="drawer-content">
@@ -542,6 +592,7 @@ onBeforeUnmount(() => {
                   v-if="store.activeTab === 'dashboard'"
                   :focused-leg-id="store.focusedLegId"
                   :legs="store.legs"
+                  :supporting-leg-ids="store.supportingLegIds"
                   :imu-quaternion="store.sensors?.imu.quaternion ?? null"
                   :imu-orientation="store.sensors?.imu.orientation ?? null"
                   compact
@@ -557,6 +608,7 @@ onBeforeUnmount(() => {
                 v-if="store.activeTab === 'legs'"
                 :focused-leg-id="store.focusedLegId"
                 :legs="store.legs"
+                :supporting-leg-ids="store.supportingLegIds"
                 :imu-quaternion="store.sensors?.imu.quaternion ?? null"
                 :imu-orientation="store.sensors?.imu.orientation ?? null"
                 @update:focused-leg-id="store.selectLeg"
@@ -568,8 +620,29 @@ onBeforeUnmount(() => {
             <MotionControlPanel />
           </TabPanel>
 
-          <TabPanel value="pressure" class="flex-1 overflow-auto">
-            <PressureMonitorPanel :actuators="store.actuators" :sensors="store.sensors" />
+          <TabPanel value="contacts" class="flex-1 overflow-auto">
+            <section class="tab-layout">
+              <ContactSensorPanel
+                v-if="store.activeTab === 'contacts'"
+                :focused-leg-id="store.focusedLegId"
+                :legs="store.legs"
+                :sensors="store.sensors"
+                :states="store.contactLegStates"
+                :threshold="store.contactThreshold"
+                :polarity="store.contactPolarity"
+                :imu-quaternion="store.sensors?.imu.quaternion ?? null"
+                :imu-orientation="store.sensors?.imu.orientation ?? null"
+                @update:focused-leg-id="store.selectLeg"
+                @update:threshold="store.setContactThreshold"
+                @update:polarity="store.setContactPolarity"
+              />
+            </section>
+          </TabPanel>
+
+          <TabPanel value="controller" class="flex-1 overflow-hidden">
+            <section class="tab-layout">
+              <GamepadPanel v-if="store.activeTab === 'controller'" />
+            </section>
           </TabPanel>
 
           <TabPanel value="sensors" class="flex-1 overflow-auto">

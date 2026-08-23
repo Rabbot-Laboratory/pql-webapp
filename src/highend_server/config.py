@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     emulate_tick_interval_sec: float = Field(default=0.05, gt=0.0)
     actuator_count: int = 8
     websocket_ping_interval_sec: float = Field(default=15.0, gt=0.0)
+    hardware_status_interval_sec: float = Field(default=0.5, gt=0.0)
+    hardware_imu_stale_sec: float = Field(default=1.0, gt=0.0)
+    # Gamepad observation is isolated from actuator output. Local evdev input
+    # must be explicitly enabled on the Pi; browser input is display/log only.
+    gamepad_local_enabled: bool = False
+    gamepad_web_enabled: bool = True
+    gamepad_device_path: str = ""
+    gamepad_name_match: str = "F710"
+    gamepad_input_timeout_sec: float = Field(default=0.2, gt=0.0)
+    gamepad_publish_interval_sec: float = Field(default=0.05, gt=0.0)
     csv_default_interval_sec: float = Field(default=1.0 / 30.0, gt=0.0)
     allowed_origin_regex: str = r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?"
     motion_root_dir: str = "Motion"
@@ -55,9 +65,11 @@ class Settings(BaseSettings):
     bmx055_gyro_address: int = 0x68
     bmx055_mag_address: int = 0x10
     adc_spi_bus: int = 0
-    adc_spi_devices: str = "0,1"
+    # One 5 V MCP3208 on CE0 exposes all eight installation-sensor channels.
+    # SPI logic is level-shifted between the Pi (3.3 V) and ADC (5 V) by TXU0304.
+    adc_spi_devices: str = "0"
     adc_spi_max_speed_hz: int = 1_000_000
-    adc_vref: float = Field(default=3.3, gt=0.0)
+    adc_vref: float = Field(default=5.0, gt=0.0)
     sensor_config_dir_name: str = "config"
     imu_calibration_file_name: str = "imu_calibration.json"
 
@@ -69,6 +81,12 @@ class Settings(BaseSettings):
     # Max absolute per-actuator correction (position units, 0..4095 scale).
     # Small by default so the loop can never command a large motion on hardware.
     stabilization_max_correction: float = Field(default=120.0, ge=0.0)
+    # Test-derived sensor-to-control signs.  The 2026-07-11 manual IMU trial
+    # observed right-side-down as negative raw Roll and nose-up as positive raw
+    # Pitch.  The feedback controller uses +Roll=right-low, +Pitch=nose-up.
+    # Keep these deliberately separate from the raw IMU/API convention.
+    stabilization_roll_sign: Literal[-1, 1] = -1
+    stabilization_pitch_sign: Literal[-1, 1] = 1
     # Max change in a correction per second (position units/sec) while active.
     stabilization_max_correction_rate: float = Field(default=400.0, gt=0.0)
     # Auto-disable if |roll| or |pitch| (level-corrected) exceeds this.
@@ -128,6 +146,38 @@ class Settings(BaseSettings):
     stabilization_derivative_source: Literal["error_difference", "gyro_rate"] = (
         "error_difference"
     )
+
+    # --- Adaptive forward walking (real-hardware conservative defaults) ----
+    # The browser renews a short lease while the forward button is held. A lost
+    # pointer-up/network/browser closes the lease and stops target updates.
+    adaptive_walk_rate_hz: float = Field(default=25.0, gt=0.0, le=100.0)
+    adaptive_walk_lease_timeout_sec: float = Field(default=0.45, gt=0.1, le=2.0)
+    adaptive_walk_max_imu_staleness_sec: float = Field(default=0.2, gt=0.0, le=1.0)
+    adaptive_walk_max_actuator_staleness_sec: float = Field(
+        default=0.5, gt=0.0, le=5.0
+    )
+    adaptive_walk_max_tilt_deg: float = Field(default=12.0, gt=0.0, le=45.0)
+    # Rear-driven rabbit bound reaches the full known motion range gradually;
+    # the independent target-rate limit remains the final hardware guard.
+    adaptive_walk_motion_scale: float = Field(default=1.0, gt=0.0, le=1.0)
+    adaptive_walk_motion_ramp_sec: float = Field(default=2.0, gt=0.0, le=30.0)
+    adaptive_walk_learning_rate: float = Field(default=0.08, ge=0.0, le=10.0)
+    adaptive_walk_feedback_gain: float = Field(default=0.10, ge=0.0, le=1.0)
+    adaptive_walk_initial_phase_lead_s: float = Field(default=0.04, ge=0.0, le=0.5)
+    adaptive_walk_max_phase_lead_s: float = Field(default=0.20, ge=0.0, le=0.5)
+    adaptive_walk_velocity_regularizer: float = Field(default=10_000.0, gt=0.0)
+    adaptive_walk_max_phase_offset: float = Field(default=60.0, ge=0.0, le=500.0)
+    adaptive_walk_attitude_kp: float = Field(default=2.0, ge=0.0, le=50.0)
+    adaptive_walk_attitude_kd: float = Field(default=0.25, ge=0.0, le=50.0)
+    adaptive_walk_trim_rate: float = Field(default=0.20, ge=0.0, le=20.0)
+    adaptive_walk_trim_leak_rate: float = Field(default=0.02, ge=0.0, le=2.0)
+    adaptive_walk_max_trim: float = Field(default=30.0, ge=0.0, le=500.0)
+    adaptive_walk_max_attitude_correction: float = Field(default=60.0, ge=0.0, le=500.0)
+    adaptive_walk_max_target_rate: float = Field(default=1200.0, gt=0.0, le=5000.0)
+    # Header Home button: ramp every axis toward Fixed Motion/home.csv instead
+    # of jumping directly to the stored pose.
+    home_motion_rate: float = Field(default=150.0, gt=0.0, le=2000.0)
+    home_motion_interval_sec: float = Field(default=0.04, gt=0.01, le=0.2)
 
     @property
     def project_root(self) -> Path:

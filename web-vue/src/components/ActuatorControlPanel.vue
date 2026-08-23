@@ -276,10 +276,6 @@ onBeforeUnmount(() => {
             <span class="summary-chip-label">Command</span>
             <strong class="summary-chip-value">{{ actuator.telemetry.command }}</strong>
           </div>
-          <div class="summary-chip summary-chip-secondary">
-            <span class="summary-chip-label">Pressure</span>
-            <strong class="summary-chip-value">{{ actuator.telemetry.pressure }}</strong>
-          </div>
           <div class="summary-chip summary-chip-warn">
             <span class="summary-chip-label">Offset</span>
             <strong class="summary-chip-value">{{ actuator.capture.min ?? '-' }}</strong>

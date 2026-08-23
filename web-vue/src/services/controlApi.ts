@@ -1,6 +1,9 @@
 import type {
+  AdaptiveWalkState,
   ActuatorState,
   FixedMotion,
+  GamepadState,
+  HardwareStatus,
   HealthResponse,
   ImportedMotionDraft,
   LegPreview,
@@ -45,6 +48,14 @@ export async function fetchSensors(): Promise<{ item: SensorState }> {
   return readJson<{ item: SensorState }>('/api/sensors');
 }
 
+export async function fetchGamepad(): Promise<{ item: GamepadState }> {
+  return readJson<{ item: GamepadState }>('/api/gamepad');
+}
+
+export async function fetchHardwareStatus(): Promise<{ item: HardwareStatus }> {
+  return readJson<{ item: HardwareStatus }>('/api/hardware');
+}
+
 export async function calibrateImuLevel(): Promise<{ item: SensorState }> {
   return readJson<{ item: SensorState }>('/api/sensors/imu/calibration/level', {
     method: 'POST',
@@ -86,6 +97,21 @@ export async function cancelMagCalibration(): Promise<{ item: SensorState }> {
 
 export async function fetchStabilization(): Promise<StabilizationState> {
   return readJson<StabilizationState>('/api/control/stabilization');
+}
+
+export async function fetchAdaptiveWalk(): Promise<AdaptiveWalkState> {
+  return readJson<AdaptiveWalkState>('/api/control/adaptive-walk');
+}
+
+export async function setAdaptiveForward(payload: {
+  pressed: boolean;
+  safety_confirmed: boolean;
+}): Promise<AdaptiveWalkState> {
+  return readJson<AdaptiveWalkState>('/api/control/adaptive-walk/forward', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateStabilization(payload: {
@@ -224,6 +250,14 @@ export async function startCsvPlayback(payload: {
 export async function stopCsvPlayback(): Promise<{ ok: boolean }> {
   return readJson<{ ok: boolean }>('/api/csv/playback/stop', {
     method: 'POST',
+  });
+}
+
+export async function moveToHome(payload: { safety_confirmed: boolean }): Promise<{ ok: boolean }> {
+  return readJson<{ ok: boolean }>('/api/control/home', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }
 

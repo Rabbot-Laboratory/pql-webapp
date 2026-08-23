@@ -76,6 +76,22 @@ class SensorConnectionState(str, Enum):
     ERROR = "error"
 
 
+class HardwareConnectionState(str, Enum):
+    DISABLED = "disabled"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    MISSING = "missing"
+    ERROR = "error"
+    STALE = "stale"
+    EMULATED = "emulated"
+
+
+class GamepadSource(str, Enum):
+    NONE = "none"
+    LOCAL = "local"
+    WEB = "web"
+
+
 class GainValues(BaseModel):
     p: int | None = None
     i: int | None = None
@@ -147,6 +163,38 @@ class HealthResponse(BaseModel):
     ok: bool
     service: str
     system: SystemStatus
+    robot_ready: bool = False
+
+
+class SerialPortState(BaseModel):
+    port_role: PortRole
+    path: str
+    connection_state: ConnectionState = ConnectionState.DISCONNECTED
+    error: str | None = None
+    last_received_at: datetime | None = None
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class HardwareDeviceStatus(BaseModel):
+    device_id: str
+    label: str
+    kind: str
+    required: bool = True
+    enabled: bool = True
+    connection_state: HardwareConnectionState
+    detail: str | None = None
+    path: str | None = None
+    last_seen_at: datetime | None = None
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class HardwareStatus(BaseModel):
+    server_ok: bool = True
+    robot_ready: bool = False
+    required_connected: int = 0
+    required_total: int = 0
+    devices: list[HardwareDeviceStatus] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class ImuVector(BaseModel):
@@ -229,6 +277,29 @@ class SensorState(BaseModel):
     imu: Bmx055State = Field(default_factory=Bmx055State)
     adc_banks: list[AdcBankState] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class GamepadState(BaseModel):
+    source: GamepadSource = GamepadSource.NONE
+    connected: bool = False
+    stale: bool = True
+    device_name: str | None = None
+    mapping: str | None = None
+    axes: dict[str, float] = Field(default_factory=dict)
+    buttons: dict[str, bool] = Field(default_factory=dict)
+    raw_axes: dict[str, float] = Field(default_factory=dict)
+    raw_buttons: dict[str, float] = Field(default_factory=dict)
+    deadman: bool = False
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class WebGamepadUpdate(BaseModel):
+    connected: bool = True
+    id: str = Field(default="browser gamepad", max_length=200)
+    index: int = Field(default=0, ge=0, le=15)
+    mapping: str = Field(default="", max_length=50)
+    axes: list[float] = Field(default_factory=list, max_length=16)
+    buttons: list[float] = Field(default_factory=list, max_length=32)
 
 
 class ImuCalibrationRequest(BaseModel):
@@ -405,6 +476,31 @@ class StabilizationState(BaseModel):
 class StabilizationRequest(BaseModel):
     enabled: bool | None = None
     gains: StabilizationGains | None = None
+
+
+class AdaptiveWalkRequest(BaseModel):
+    pressed: bool
+    safety_confirmed: bool = False
+
+
+class HomePoseRequest(BaseModel):
+    safety_confirmed: bool = False
+
+
+class AdaptiveWalkState(BaseModel):
+    active: bool = False
+    auto_stopped: bool = False
+    stopped_reason: str | None = None
+    phase: float = Field(default=0.0, ge=0.0, le=1.0)
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
+    imu_stale: bool = True
+    motion_scale: float = Field(default=0.0, ge=0.0, le=1.0)
+    lease_remaining_ms: int = Field(default=0, ge=0)
+    roll_trim: float = 0.0
+    pitch_trim: float = 0.0
+    learned_phase_lead_s: list[float] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class ExperimentStartRequest(BaseModel):

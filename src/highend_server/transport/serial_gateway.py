@@ -6,11 +6,18 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import serial
 
 from highend_server.config import Settings
-from highend_server.domain.models import COMMAND_NEUTRAL, ConnectionState, DeviceEnvelope, PortRole
+from highend_server.domain.models import (
+    COMMAND_NEUTRAL,
+    ConnectionState,
+    DeviceEnvelope,
+    PortRole,
+    SerialPortState,
+)
 from highend_server.protocol.constants import FORMAT_SENSOR_BASE
 from highend_server.protocol.frames import encode_transport_payload
 
@@ -36,6 +43,16 @@ class SerialGateway:
 
     async def send_frame(self, port_role: PortRole, frame: int) -> None:
         raise NotImplementedError
+
+    def port_states(self) -> list[SerialPortState]:
+        return []
+
+    def is_port_connected(self, port_role: PortRole) -> bool:
+        return any(
+            state.port_role is port_role
+            and state.connection_state is ConnectionState.CONNECTED
+            for state in self.port_states()
+        )
 
 
 @dataclass(slots=True)
@@ -65,6 +82,22 @@ class PySerialGateway(SerialGateway):
         self._connection_lock = threading.Lock()
         self._connections: dict[PortRole, serial.Serial] = {}
         self._reader_threads: dict[PortRole, threading.Thread] = {}
+        self._port_errors: dict[PortRole, str | None] = {
+            PortRole.FRONT: None,
+            PortRole.BACK: None,
+        }
+        self._port_updated_at: dict[PortRole, datetime] = {
+            PortRole.FRONT: datetime.now(UTC),
+            PortRole.BACK: datetime.now(UTC),
+        }
+        self._port_last_received_at: dict[PortRole, datetime | None] = {
+            PortRole.FRONT: None,
+            PortRole.BACK: None,
+        }
+        self._port_last_warning_at: dict[PortRole, float] = {
+            PortRole.FRONT: 0.0,
+            PortRole.BACK: 0.0,
+        }
 
     async def connect(self) -> None:
         if self.connection_state is ConnectionState.CONNECTED:
@@ -93,14 +126,14 @@ class PySerialGateway(SerialGateway):
             self._reader_threads[port_role] = thread
             thread.start()
 
-        connected_count = len(self._connections)
-        expected_count = len(self._port_map())
-        if connected_count == 0 or (self.settings.require_all_ports and connected_count != expected_count):
-            await self.disconnect()
-            self.connection_state = ConnectionState.ERROR
+        # Missing hardware must not prevent the API/UI from starting. Reader
+        # threads keep retrying each port independently until it appears.
+        if failures:
             failure_text = ", ".join(f"{role.value}: {reason}" for role, reason in failures.items())
-            raise ConnectionError(f"Unable to open required serial ports. {failure_text}".strip())
-
+            logger.warning(
+                "Serial startup incomplete; continuing without blocking: %s",
+                failure_text,
+            )
         self._refresh_connection_state()
 
     async def disconnect(self) -> None:
@@ -129,6 +162,30 @@ class PySerialGateway(SerialGateway):
 
         payload = encode_transport_payload(frame, byteorder="big")
         await asyncio.to_thread(self._write_payload, connection, port_role, payload)
+
+    def port_states(self) -> list[SerialPortState]:
+        states: list[SerialPortState] = []
+        with self._connection_lock:
+            for port_role, path in self._port_map().items():
+                connection = self._connections.get(port_role)
+                connected = connection is not None and connection.is_open
+                if connected:
+                    state = ConnectionState.CONNECTED
+                elif self._stop_event.is_set():
+                    state = ConnectionState.DISCONNECTED
+                else:
+                    state = ConnectionState.CONNECTING
+                states.append(
+                    SerialPortState(
+                        port_role=port_role,
+                        path=path,
+                        connection_state=state,
+                        error=self._port_errors.get(port_role),
+                        last_received_at=self._port_last_received_at.get(port_role),
+                        updated_at=self._port_updated_at[port_role],
+                    )
+                )
+        return states
 
     def _port_map(self) -> dict[PortRole, str]:
         return {
@@ -173,11 +230,17 @@ class PySerialGateway(SerialGateway):
                 if not token or not self._looks_like_transport_payload(token):
                     continue
 
+                with self._connection_lock:
+                    self._port_last_received_at[port_role] = datetime.now(UTC)
                 envelope = DeviceEnvelope(port_role=port_role, payload=token)
-                future = asyncio.run_coroutine_threadsafe(self._device_callback(envelope), self._loop)
+                future = asyncio.run_coroutine_threadsafe(
+                    self._device_callback(envelope), self._loop
+                )
                 future.add_done_callback(self._log_callback_failure)
 
-    def _write_payload(self, connection: serial.Serial, port_role: PortRole, payload: bytes) -> None:
+    def _write_payload(
+        self, connection: serial.Serial, port_role: PortRole, payload: bytes
+    ) -> None:
         with self._write_lock:
             try:
                 connection.write(payload)
@@ -197,7 +260,18 @@ class PySerialGateway(SerialGateway):
                 write_timeout=self.settings.serial_write_timeout_sec,
             )
         except serial.SerialException as exc:
-            logger.warning("Failed to open %s on %s: %s", port_role.value, port_name, exc)
+            error_text = str(exc) or repr(exc)
+            now = time.monotonic()
+            with self._connection_lock:
+                previous_error = self._port_errors[port_role]
+                last_warning = self._port_last_warning_at[port_role]
+                self._port_errors[port_role] = error_text
+                self._port_updated_at[port_role] = datetime.now(UTC)
+                should_warn = previous_error != error_text or now - last_warning >= 30.0
+                if should_warn:
+                    self._port_last_warning_at[port_role] = now
+            log = logger.warning if should_warn else logger.debug
+            log("Failed to open %s on %s: %s", port_role.value, port_name, exc)
             return None
 
         # Give ESP32-class devices a moment to settle after the port open/reset.
@@ -227,14 +301,20 @@ class PySerialGateway(SerialGateway):
     def _set_connection(self, port_role: PortRole, connection: serial.Serial) -> None:
         with self._connection_lock:
             self._connections[port_role] = connection
+            self._port_errors[port_role] = None
+            self._port_updated_at[port_role] = datetime.now(UTC)
 
-    def _drop_connection(self, port_role: PortRole, *, expected: serial.Serial | None = None) -> None:
+    def _drop_connection(
+        self, port_role: PortRole, *, expected: serial.Serial | None = None
+    ) -> None:
         with self._connection_lock:
             current = self._connections.get(port_role)
             if expected is not None and current is not expected:
                 current = expected
             else:
                 self._connections.pop(port_role, None)
+            self._port_errors[port_role] = "serial connection lost"
+            self._port_updated_at[port_role] = datetime.now(UTC)
 
         if current is None:
             self._refresh_connection_state()
@@ -244,7 +324,11 @@ class PySerialGateway(SerialGateway):
             if current.is_open:
                 current.close()
         except serial.SerialException:
-            logger.debug("Failed to close dropped serial connection for %s", port_role.value, exc_info=True)
+            logger.debug(
+                "Failed to close dropped serial connection for %s",
+                port_role.value,
+                exc_info=True,
+            )
 
         if expected is not None:
             with self._connection_lock:
@@ -258,7 +342,9 @@ class PySerialGateway(SerialGateway):
             return
 
         with self._connection_lock:
-            connected_count = sum(1 for connection in self._connections.values() if connection.is_open)
+            connected_count = sum(
+                1 for connection in self._connections.values() if connection.is_open
+            )
 
         expected_count = len(self._port_map())
         if connected_count == 0:
@@ -310,7 +396,9 @@ class StubSerialGateway(SerialGateway):
     async def connect(self) -> None:
         self.connection_state = ConnectionState.CONNECTED
         if self._telemetry_task is None or self._telemetry_task.done():
-            self._telemetry_task = asyncio.create_task(self._telemetry_loop(), name="stub-telemetry")
+            self._telemetry_task = asyncio.create_task(
+                self._telemetry_loop(), name="stub-telemetry"
+            )
 
     async def disconnect(self) -> None:
         if self._telemetry_task and not self._telemetry_task.done():
@@ -325,6 +413,24 @@ class StubSerialGateway(SerialGateway):
     async def send_frame(self, port_role: PortRole, frame: int) -> None:
         self.sent_frames.append((port_role, frame))
         await self._handle_outbound_frame(port_role, frame)
+
+    def port_states(self) -> list[SerialPortState]:
+        state = (
+            ConnectionState.CONNECTED
+            if self.connection_state is ConnectionState.CONNECTED
+            else ConnectionState.DISCONNECTED
+        )
+        now = datetime.now(UTC)
+        return [
+            SerialPortState(
+                port_role=port_role,
+                path=f"emulated:{port_role.value.casefold()}",
+                connection_state=state,
+                last_received_at=now if state is ConnectionState.CONNECTED else None,
+                updated_at=now,
+            )
+            for port_role in (PortRole.FRONT, PortRole.BACK)
+        ]
 
     async def _handle_outbound_frame(self, port_role: PortRole, frame: int) -> None:
         format_value = (frame >> 58) & 0x3F
@@ -402,7 +508,11 @@ class StubSerialGateway(SerialGateway):
                                 int(
                                     900
                                     + (actuator.position / 4095) * 2200
-                                    + (abs(actuator.command - COMMAND_NEUTRAL) / COMMAND_NEUTRAL) * 700
+                                    + (
+                                        abs(actuator.command - COMMAND_NEUTRAL)
+                                        / COMMAND_NEUTRAL
+                                    )
+                                    * 700
                                 ),
                             ),
                         )

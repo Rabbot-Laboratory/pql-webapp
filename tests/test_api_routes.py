@@ -18,10 +18,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from highend_server.api.routes import router
+from highend_server.application.adaptive_walking import AdaptiveWalkingController
 from highend_server.application.control_service import ControlService
 from highend_server.application.experiment import ExperimentRecorder
+from highend_server.application.hardware_status import HardwareStatusService
 from highend_server.application.stabilization import StabilizationController
 from highend_server.config import Settings
+from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
 from highend_server.transport.serial_gateway import StubSerialGateway
 
@@ -50,6 +53,13 @@ def _make_app(settings: Settings) -> FastAPI:
         settings=settings, gateway=StubSerialGateway(settings), event_sink=event_sink
     )
     sensor_service = SensorService(settings=settings, event_sink=event_sink)
+    gamepad_service = GamepadService(settings=settings, event_sink=event_sink)
+    hardware_status_service = HardwareStatusService(
+        settings=settings,
+        gateway=control_service.gateway,
+        sensor_service=sensor_service,
+        event_sink=event_sink,
+    )
     control_service.set_attitude_provider(sensor_service.latest_attitude)
     control_service.set_level_offsets_provider(sensor_service.level_offsets)
     stabilization_controller = StabilizationController(
@@ -58,6 +68,14 @@ def _make_app(settings: Settings) -> FastAPI:
         attitude_provider=sensor_service.latest_attitude,
         level_offsets_provider=sensor_service.level_offsets,
         event_sink=event_sink,
+    )
+    adaptive_walking_controller = AdaptiveWalkingController(
+        settings=settings,
+        control_service=control_service,
+        attitude_provider=sensor_service.latest_attitude,
+        level_offsets_provider=sensor_service.level_offsets,
+        event_sink=event_sink,
+        stabilization_engaged=lambda: stabilization_controller.enabled,
     )
     experiment_recorder = ExperimentRecorder(settings=settings)
     experiment_recorder.bind(
@@ -70,12 +88,18 @@ def _make_app(settings: Settings) -> FastAPI:
     async def lifespan(app: FastAPI):
         await control_service.connect()
         await sensor_service.start()
+        await gamepad_service.start()
+        await hardware_status_service.start()
         await stabilization_controller.start()
+        await adaptive_walking_controller.start()
         try:
             yield
         finally:
             await experiment_recorder.shutdown()
+            await adaptive_walking_controller.stop()
             await stabilization_controller.stop()
+            await gamepad_service.stop()
+            await hardware_status_service.stop()
             await sensor_service.stop()
             await control_service.shutdown()
 
@@ -83,7 +107,10 @@ def _make_app(settings: Settings) -> FastAPI:
     app.state.settings = settings
     app.state.control_service = control_service
     app.state.sensor_service = sensor_service
+    app.state.gamepad_service = gamepad_service
+    app.state.hardware_status_service = hardware_status_service
     app.state.stabilization_controller = stabilization_controller
+    app.state.adaptive_walking_controller = adaptive_walking_controller
     app.state.experiment_recorder = experiment_recorder
     app.include_router(router, prefix="/api")
     return app
@@ -112,6 +139,22 @@ def test_health_responds(client: TestClient) -> None:
     body = response.json()
     assert body["service"] == "highend-control-server"
     assert "system" in body
+    assert body["robot_ready"] is True
+
+
+def test_home_requires_confirmation_and_starts_ramp(client: TestClient) -> None:
+    denied = client.post("/api/control/home", json={"safety_confirmed": False})
+    assert denied.status_code == 400
+
+    fixed_path = client.app.state.settings.fixed_motion_path
+    fixed_path.mkdir(parents=True, exist_ok=True)
+    (fixed_path / "home.csv").write_text(
+        "# interval_sec=0.04\n2048,2048,2048,2048,2048,2048,2048,2048\n",
+        encoding="utf-8",
+    )
+    started = client.post("/api/control/home", json={"safety_confirmed": True})
+    assert started.status_code == 200
+    assert started.json() == {"ok": True}
 
 
 def test_get_sensors_shape(client: TestClient) -> None:
@@ -120,6 +163,29 @@ def test_get_sensors_shape(client: TestClient) -> None:
     imu = response.json()["item"]["imu"]
     assert "quaternion" in imu
     assert "mag_calibration_active" in imu
+
+
+def test_get_gamepad_shape(client: TestClient) -> None:
+    response = client.get("/api/gamepad")
+    assert response.status_code == 200
+    state = response.json()["item"]
+    assert state["source"] == "none"
+    assert state["connected"] is False
+    assert state["deadman"] is False
+
+
+def test_get_hardware_status_shape(client: TestClient) -> None:
+    response = client.get("/api/hardware")
+    assert response.status_code == 200
+    state = response.json()["item"]
+    assert state["server_ok"] is True
+    assert state["robot_ready"] is True
+    assert {device["device_id"] for device in state["devices"]} == {
+        "esp32_front",
+        "esp32_back",
+        "imu_bmx055",
+        "contact_adc",
+    }
 
 
 def test_get_stabilization_state_shape(client: TestClient) -> None:
@@ -154,6 +220,28 @@ def test_post_stabilization_rejects_invalid_gains(client: TestClient) -> None:
         }},
     )
     assert response.status_code == 422
+
+
+def test_adaptive_forward_requires_confirmation_and_releases(client: TestClient) -> None:
+    rejected = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={"pressed": True, "safety_confirmed": False},
+    )
+    assert rejected.status_code == 400
+
+    started = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={"pressed": True, "safety_confirmed": True},
+    )
+    assert started.status_code == 200
+    assert started.json()["active"] is True
+
+    stopped = client.post(
+        "/api/control/adaptive-walk/forward",
+        json={"pressed": False, "safety_confirmed": False},
+    )
+    assert stopped.status_code == 200
+    assert stopped.json()["active"] is False
 
 
 def test_calibration_blocked_while_stabilization_enabled(client: TestClient) -> None:

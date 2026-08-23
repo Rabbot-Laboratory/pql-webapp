@@ -8,6 +8,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import ceil
 from pathlib import Path
 from time import monotonic
 from typing import TextIO
@@ -24,6 +25,7 @@ from highend_server.domain.models import (
     POSITION_MIN,
     ActuatorState,
     CaptureRequest,
+    ConnectionState,
     ControlMode,
     CsvPlaybackRequest,
     DeviceEnvelope,
@@ -103,6 +105,29 @@ logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
 
 
+def build_rate_limited_position_rows(
+    start: list[int],
+    target: list[int],
+    *,
+    max_rate: float,
+    interval_sec: float,
+) -> list[list[str]]:
+    """Interpolate a bounded-rate position move, excluding the start row."""
+    if not start or len(start) != len(target):
+        raise ValueError("home start and target vectors must have equal non-zero length")
+    if max_rate <= 0.0 or interval_sec <= 0.0:
+        raise ValueError("home rate and interval must be positive")
+    max_difference = max(abs(end - begin) for begin, end in zip(start, target, strict=True))
+    steps = max(1, ceil(max_difference / (max_rate * interval_sec)))
+    return [
+        [
+            str(round(begin + (end - begin) * step / steps))
+            for begin, end in zip(start, target, strict=True)
+        ]
+        for step in range(1, steps + 1)
+    ]
+
+
 class ControlService:
     def __init__(
         self,
@@ -130,6 +155,10 @@ class ControlService:
 
         self._lock = asyncio.Lock()
         self._csv_task: asyncio.Task[None] | None = None
+        # Exclusive owner flag for the lease-controlled adaptive walking loop.
+        # It prevents manual targets and CSV playback from racing 25 Hz walking
+        # target updates on the same pneumatic actuators.
+        self._adaptive_walking_active = False
         self._playback_status = PlaybackStatus.IDLE
         self._current_motion_name: str | None = None
         self._current_motion_category: MotionCategory | None = None
@@ -138,6 +167,10 @@ class ControlService:
         # `motion_frame`). None whenever playback is idle.
         self._playback_row_index: int | None = None
         self._actuators = self._build_initial_actuators(settings.actuator_count)
+        self._telemetry_received_actuators: set[int] = set()
+        self._actuator_telemetry_received_at: list[float | None] = [
+            None
+        ] * settings.actuator_count
         # Phase 2 stabilization composition layer. Corrections are position-target
         # offsets added on top of the user/CSV *base* targets at frame-send time.
         # Default all-zero => effective == base => byte-identical to prior behaviour.
@@ -201,6 +234,18 @@ class ControlService:
 
     def list_actuators(self) -> list[ActuatorState]:
         return [actuator.model_copy(deep=True) for actuator in self._actuators]
+
+    @property
+    def has_complete_actuator_telemetry(self) -> bool:
+        return len(self._telemetry_received_actuators) >= self.settings.actuator_count
+
+    def has_fresh_actuator_telemetry(self, max_age_sec: float) -> bool:
+        """Return true only when every actuator has reported recently."""
+        now = self._time_fn()
+        return all(
+            received_at is not None and now - received_at <= max_age_sec
+            for received_at in self._actuator_telemetry_received_at
+        )
 
     def get_actuator(self, actuator_id: int) -> ActuatorState:
         return self._actuators[actuator_id].model_copy(deep=True)
@@ -362,6 +407,8 @@ class ControlService:
         self._level_offsets_provider = provider or (lambda: (0.0, 0.0))
 
     async def set_target(self, actuator_id: int, request: SetTargetRequest) -> ActuatorState:
+        if self._adaptive_walking_active:
+            raise RuntimeError("adaptive walking active — release Forward before manual control")
         actuator = self._actuators[actuator_id]
 
         async with self._lock:
@@ -432,6 +479,8 @@ class ControlService:
         await self._emit("motion_request", {"motion": request.motion.value})
 
     async def start_csv_playback(self, request: CsvPlaybackRequest) -> None:
+        if self._adaptive_walking_active:
+            raise RuntimeError("adaptive walking active — release Forward before CSV playback")
         await self.stop_csv_playback()
         self._playback_status = PlaybackStatus.RUNNING
         self._current_motion_name = request.motion_name
@@ -440,6 +489,72 @@ class ControlService:
         await self._emit("csv_playback_status", {"status": self._playback_status.value})
         await self._publish_server_status()
         self._csv_task = asyncio.create_task(self._run_csv_playback(request), name="csv-playback")
+
+    async def start_home_motion(self) -> None:
+        """Ramp from fresh measured positions to the tunable fixed home pose."""
+        if self.system_status.connection_state is not ConnectionState.CONNECTED:
+            raise RuntimeError("both actuator controllers must be connected before Home")
+        if not self.settings.emulate_devices and not self.has_fresh_actuator_telemetry(
+            self.settings.adaptive_walk_max_actuator_staleness_sec
+        ):
+            raise RuntimeError("fresh telemetry from all actuators is required before Home")
+
+        detail = self.get_motion_file(MotionCategory.FIXED, "home")
+        if not detail.rows:
+            raise RuntimeError("Fixed Motion/home.csv must contain a target row")
+        target = [int(value) for value in detail.rows[-1][: self.settings.actuator_count]]
+        if len(target) != self.settings.actuator_count:
+            raise RuntimeError("Fixed Motion/home.csv must contain all actuator targets")
+        start = [item.telemetry.position for item in self.list_actuators()]
+        rows = build_rate_limited_position_rows(
+            start,
+            target,
+            max_rate=self.settings.home_motion_rate,
+            interval_sec=self.settings.home_motion_interval_sec,
+        )
+        await self.start_csv_playback(
+            CsvPlaybackRequest(
+                rows=rows,
+                interval_sec=self.settings.home_motion_interval_sec,
+                loop=False,
+                motion_name="home",
+                motion_category=MotionCategory.FIXED,
+            )
+        )
+
+    async def claim_adaptive_walking(self) -> None:
+        """Give the adaptive walking loop exclusive ownership of position targets."""
+        await self.stop_csv_playback()
+        async with self._lock:
+            if self._adaptive_walking_active:
+                raise RuntimeError("adaptive walking is already active")
+            self._adaptive_walking_active = True
+
+    async def release_adaptive_walking(self) -> None:
+        """Release walking ownership while holding the last commanded posture."""
+        async with self._lock:
+            self._adaptive_walking_active = False
+
+    async def apply_adaptive_walking_targets(self, targets: list[int]) -> None:
+        """Atomically send one rate-limited walking target vector to both ESP32s."""
+        if len(targets) != self.settings.actuator_count:
+            raise ValueError("adaptive walking target count must match actuator_count")
+        per_port_fields: dict[PortRole, list[int]] = {}
+        async with self._lock:
+            if not self._adaptive_walking_active:
+                raise RuntimeError("adaptive walking target ownership is not active")
+            for index, value in enumerate(targets):
+                clamped = max(POSITION_MIN, min(POSITION_MAX, int(value)))
+                self._commit_base_position_locked(self._actuators[index], clamped)
+            for port_role in (PortRole.FRONT, PortRole.BACK):
+                fields = self._effective_position_fields(port_role)
+                per_port_fields[port_role] = fields
+
+        for port_role, fields in per_port_fields.items():
+            frame = build_set_target_frame(fields, ControlMode.POSITION)
+            await self.gateway.send_frame(port_role, frame)
+            async with self._lock:
+                self._last_sent_position[port_role] = list(fields)
 
     async def stop_csv_playback(self) -> None:
         if self._csv_task and not self._csv_task.done():
@@ -478,6 +593,8 @@ class ControlService:
                 actuator.telemetry.command = decoded.command
                 actuator.telemetry.pressure = decoded.pressure
                 actuator.updated_at = datetime.now(UTC)
+                self._telemetry_received_actuators.add(global_index)
+                self._actuator_telemetry_received_at[global_index] = self._time_fn()
                 self._append_telemetry_log_row(actuator)
             await self._emit(
                 "telemetry",

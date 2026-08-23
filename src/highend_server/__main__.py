@@ -11,7 +11,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--demo",
         action="store_true",
-        help="Start in demo mode with emulated ESP32 devices instead of serial ports.",
+        help=(
+            "Start in demo mode with emulated devices and a stationary IMU. "
+            "HIGHEND_EMULATED_IMU_SCENARIO can select another IMU profile."
+        ),
     )
     parser.add_argument(
         "--replay",
@@ -61,6 +64,10 @@ def main() -> None:
     args = parse_args()
     if args.demo:
         os.environ["HIGHEND_EMULATE_DEVICES"] = "true"
+        # A moving default is useful for filter tests but distracting when the
+        # demo is used to inspect the robot model and UI. Keep the explicit
+        # environment override so named IMU scenarios remain available.
+        os.environ.setdefault("HIGHEND_EMULATED_IMU_SCENARIO", "static")
 
     if args.replay is not None:
         os.environ["HIGHEND_REPLAY_DIR"] = str(args.replay)

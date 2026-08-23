@@ -277,7 +277,7 @@ def test_csv_header_exact(tmp_path: Path) -> None:
     summary = asyncio.run(scenario())
     header, _ = _read_csv(Path(summary.directory))
     assert header == CSV_HEADER
-    assert len(header) == 37
+    assert len(header) == 41
 
 
 def test_effective_target_row_invariant(tmp_path: Path) -> None:
@@ -341,12 +341,45 @@ def test_attitude_none_blanks_imu_columns(tmp_path: Path) -> None:
     assert written == 8
     header, data = _read_csv(Path(summary.directory))
     assert len(data) == 8
-    imu_cols = ["roll", "pitch", "yaw", "gyro_x", "accel_norm", "mag_x", "mag_valid",
-                "accel_confidence_candidate"]
+    imu_cols = [
+        "roll",
+        "pitch",
+        "level_roll",
+        "level_pitch",
+        "control_roll",
+        "control_pitch",
+        "yaw",
+        "gyro_x",
+        "accel_norm",
+        "mag_x",
+        "mag_valid",
+        "accel_confidence_candidate",
+    ]
     for name in imu_cols:
         assert data[0][header.index(name)] == ""
     # control columns still populated
     assert data[0][header.index("actuator_id")] == "0"
+
+
+def test_csv_records_raw_level_and_trial_control_tilt(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path)
+    sensor = _FakeSensor(attitude=_make_attitude(), offsets=(0.234, -0.345))
+    recorder = _make_recorder(settings, sensor=sensor)
+
+    async def scenario():
+        await recorder.start(ExperimentStartRequest(experiment_type="t"))
+        await recorder._sample_once()
+        return await recorder.stop()
+
+    summary = asyncio.run(scenario())
+    header, data = _read_csv(Path(summary.directory))
+    row = data[0]
+    assert row[header.index("roll")] == "1.234"
+    assert row[header.index("pitch")] == "-2.345"
+    assert row[header.index("level_roll")] == "1.000"
+    assert row[header.index("level_pitch")] == "-2.000"
+    assert row[header.index("control_roll")] == "-1.000"
+    assert row[header.index("control_pitch")] == "-2.000"
 
 
 # ---------------------------------------------------------------------------

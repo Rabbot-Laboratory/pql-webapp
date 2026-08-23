@@ -19,6 +19,13 @@ def _emulated_settings(**overrides) -> Settings:
     return Settings(**base)
 
 
+def test_mcp3208_hardware_defaults() -> None:
+    settings = Settings()
+
+    assert settings.adc_spi_devices == "0"
+    assert settings.adc_vref == 5.0
+
+
 def test_sensor_service_emits_demo_sensor_state_in_device_emulation_mode() -> None:
     async def scenario() -> None:
         events: list[TelemetryEvent] = []
@@ -51,6 +58,9 @@ def test_sensor_service_emits_demo_sensor_state_in_device_emulation_mode() -> No
         assert state.imu.gravity_g is not None
         assert state.imu.linear_accel_g is not None
         assert state.adc_banks
+        assert len(state.adc_banks) == 1
+        assert state.adc_banks[0].device == 0
+        assert len(state.adc_banks[0].channels) == 8
         assert all(
             bank.connection_state is SensorConnectionState.CONNECTED
             for bank in state.adc_banks
@@ -629,6 +639,24 @@ def test_failed_mag_fit_preserves_samples_and_resumes_collection() -> None:
 # ---------------------------------------------------------------------------
 # Emulated IMU scenarios
 # ---------------------------------------------------------------------------
+
+
+def test_emulated_static_imu_has_no_display_motion() -> None:
+    class _VirtualClock:
+        def __init__(self) -> None:
+            self.t = 0.0
+
+        def __call__(self) -> float:
+            self.t += 0.25
+            return self.t
+
+    source = EmulatedImuSource(time_fn=_VirtualClock(), scenario="static")
+
+    for _ in range(20):
+        reading = source.read()
+        assert reading.accel_g == Vector3(0.0, 0.0, 1.0)
+        assert reading.gyro_dps == Vector3(0.0, 0.0, 0.0)
+        assert reading.mag_raw == Vector3(22.0, 0.0, -40.0)
 
 
 def test_emulated_imu_source_roll_step_scenario_drives_attitude_progression() -> None:

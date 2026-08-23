@@ -14,6 +14,7 @@ import { legLabel } from '@/utils/i18n';
 const props = defineProps<{
   legs: LegPreview[];
   focusedLegId: LegId;
+  supportingLegIds?: LegId[];
   imuQuaternion?: ImuQuaternion | null;
   imuOrientation?: ImuOrientation | null;
   compact?: boolean;
@@ -64,6 +65,7 @@ function degrees(radians: number): string {
           <RobotModelViewport
             :legs="legs"
             :focused-leg-id="focusedLegId"
+            :supporting-leg-ids="supportingLegIds"
             :imu-quaternion="imuQuaternion"
             :imu-orientation="imuOrientation"
           />
@@ -89,6 +91,7 @@ function degrees(radians: number): string {
               <RobotModelViewport
                 :legs="legs"
                 :focused-leg-id="focusedLegId"
+                :supporting-leg-ids="supportingLegIds"
                 :imu-quaternion="imuQuaternion"
                 :imu-orientation="imuOrientation"
               />

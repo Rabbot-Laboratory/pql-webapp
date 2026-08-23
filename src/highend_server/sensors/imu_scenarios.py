@@ -35,6 +35,7 @@ class ScenarioSample:
     yaw_deg: float
     accel_extra_g: Vector3 = field(default_factory=lambda: _ZERO)
     gyro_bias_dps: Vector3 = field(default_factory=lambda: _ZERO)
+    baseline_accel_scale: float = 1.0
     inject_nan: bool = False
     hold_stale: bool = False
 
@@ -59,8 +60,13 @@ def _smooth(elapsed: float) -> ScenarioSample:
 
 
 def _static(_elapsed: float) -> ScenarioSample:
-    # All-zero attitude, forever — a stationary, perfectly level baseline.
-    return ScenarioSample(roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0)
+    # Stable baseline for `--demo`: exactly level, without synthetic ripple.
+    return ScenarioSample(
+        roll_deg=0.0,
+        pitch_deg=0.0,
+        yaw_deg=0.0,
+        baseline_accel_scale=0.0,
+    )
 
 
 def _roll_step(elapsed: float) -> ScenarioSample:

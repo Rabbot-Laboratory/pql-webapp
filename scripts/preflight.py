@@ -81,6 +81,23 @@ def check_i2c(dev_path: str = "/dev/i2c-1") -> CheckResult:
     return CheckResult("I2C bus", "NG", f"{path} not found")
 
 
+def check_spi(dev_path: str = "/dev/spidev0.0") -> CheckResult:
+    """Confirm that SPI0/CE0 is enabled and exposed by the kernel.
+
+    MCP3208 has no identity register, so opening the spidev node cannot prove
+    that the ADC or its level shifter is electrically connected.  The actual
+    installation sensors must still be verified by observing channel changes.
+    """
+    path = Path(dev_path)
+    if path.exists():
+        return CheckResult("SPI bus", "OK", str(path))
+    return CheckResult(
+        "SPI bus",
+        "NG",
+        f"{path} not found (enable SPI0 before testing MCP3208)",
+    )
+
+
 def check_bmx055(
     bus: int = 1, addresses: tuple[int, ...] = (0x18, 0x68, 0x10)
 ) -> CheckResult:
@@ -181,6 +198,7 @@ def run_preflight(
         check_python(),
         check_git(project_root),
         check_i2c(),
+        check_spi(),
         check_bmx055(),
         check_serial_ports(),
         check_api_health(base_url),
