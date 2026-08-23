@@ -2090,3 +2090,187 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Walking debug additions (gait diagram / experiment / walk card) ------ */
+
+.motion-extras {
+  display: grid;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
+}
+
+.gait-diagram-scroll {
+  overflow-x: auto;
+}
+
+.gait-diagram-svg {
+  width: 100%;
+  min-width: 480px;
+  height: 130px;
+  display: block;
+}
+
+.gait-baseline {
+  stroke: var(--p-surface-400, #9aa0a6);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+
+.gait-contact-bar {
+  fill: var(--p-green-500, #22c55e);
+  opacity: 0.85;
+}
+
+.gait-cycle-line {
+  stroke: var(--p-primary-500, #3b82f6);
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.gait-gate-band {
+  fill: var(--p-orange-400, #fb923c);
+  opacity: 0.25;
+}
+
+.gait-leg-label {
+  font-size: 11px;
+  fill: currentColor;
+}
+
+.adaptive-walk-run-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.adaptive-walk-axis-list {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.5rem;
+}
+
+.adaptive-walk-axis-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr 3.5rem auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.adaptive-walk-axis-label {
+  white-space: nowrap;
+}
+
+.adaptive-walk-lead-track {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--p-surface-200, #e5e7eb);
+  overflow: hidden;
+}
+
+.adaptive-walk-lead-bar {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--p-primary-500, #3b82f6);
+  transition: width 0.2s ease;
+}
+
+.adaptive-walk-lead-bar.is-maxed {
+  background: var(--p-red-500, #ef4444);
+}
+
+.adaptive-walk-lead-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.axis-flag-tag {
+  font-size: 0.65rem;
+}
+
+.adaptive-walk-contact-dots {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.contact-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  background: var(--p-surface-200, #e5e7eb);
+  color: var(--p-surface-600, #52525b);
+}
+
+.contact-dot.is-supporting {
+  background: var(--p-green-500, #22c55e);
+  color: #fff;
+}
+
+.contact-calibration-grid {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.contact-calibration-row {
+  display: grid;
+  grid-template-columns: 5rem 7rem auto auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.contact-calibration-raw,
+.contact-calibration-current {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.contact-calibration-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.experiment-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.experiment-note-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: start;
+  margin-bottom: 0.75rem;
+}
+
+.experiment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.experiment-table th,
+.experiment-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--p-surface-200, #e5e7eb);
+}
+
+@media (max-width: 900px) {
+  .contact-calibration-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

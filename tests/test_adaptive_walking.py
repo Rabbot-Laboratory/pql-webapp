@@ -583,3 +583,32 @@ async def _auto_record_scenario(tmp_path: Path) -> None:
     finally:
         await controller.release()
         await control.shutdown()
+
+
+def test_keepalive_cannot_restart_after_automatic_stop(tmp_path: Path) -> None:
+    asyncio.run(_keepalive_restart_scenario(tmp_path))
+
+
+async def _keepalive_restart_scenario(tmp_path: Path) -> None:
+    controller, control, clock, _events = _make_walk_controller(tmp_path)
+    await control.connect()
+    try:
+        await controller.set_forward_pressed(True, safety_confirmed=True, cycles=1)
+        for _ in range(10):
+            clock.value += 0.04
+            await controller._step()
+            if not controller.get_state().active:
+                break
+        assert controller.get_state().stopped_reason == "cycle target reached"
+
+        # A still-held button keeps sending keepalives: they must NOT restart.
+        with pytest.raises(RuntimeError, match="release the forward button"):
+            await controller.set_forward_pressed(True, safety_confirmed=True)
+
+        # After an explicit release, a fresh press starts a new walk.
+        await controller.set_forward_pressed(False, safety_confirmed=False)
+        state = await controller.set_forward_pressed(True, safety_confirmed=True)
+        assert state.active is True
+    finally:
+        await controller.release()
+        await control.shutdown()

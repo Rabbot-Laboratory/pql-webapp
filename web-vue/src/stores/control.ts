@@ -2,12 +2,18 @@ import { computed, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 
 import {
+  addExperimentNote,
   calibrateImuGyroZero,
   calibrateImuLevel,
   cancelMagCalibration as apiCancelMagCalibration,
   createWebSocket,
   deleteMotionFile,
   fetchAdaptiveWalk,
+  fetchContactCalibration,
+  listExperiments,
+  startExperiment,
+  stopExperiment,
+  updateContactCalibration,
   fetchActuators,
   fetchHealth,
   fetchGamepad,
@@ -39,9 +45,13 @@ import {
   updateStabilization,
 } from '@/services/controlApi';
 import type {
+  AdaptiveWalkMode,
   AdaptiveWalkState,
   ActuatorState,
+  ContactCalibration,
   ControlMode,
+  ExperimentManifest,
+  ExperimentSummary,
   FixedMotion,
   GamepadState,
   HardwareStatus,
@@ -63,15 +73,22 @@ import type {
   TelemetryRecordingStatus,
   TelemetrySample,
 } from '@/types/control';
-import {
-  deriveContactLegStates,
-  type ContactPolarity,
-} from '@/utils/contactSensors';
+import { deriveContactLegStates } from '@/utils/contactSensors';
 
 type WsState = 'connecting' | 'live' | 'disconnected' | 'error';
 
 const HISTORY_LIMIT = 120;
 const UI_FLUSH_INTERVAL_MS = 40;
+// Rolling window for the gait diagram: ~25 s at the 20 Hz sensor push rate.
+const GAIT_HISTORY_LIMIT = 512;
+
+export interface GaitSample {
+  t: number;
+  phase: number | null;
+  gateWaiting: boolean;
+  walking: boolean;
+  contacts: Record<LegId, boolean>;
+}
 
 function legIdForActuator(actuatorId: number): LegId {
   if (actuatorId <= 1) return 'front_right';
@@ -108,8 +125,11 @@ export const useControlStore = defineStore('control', () => {
   const sensors = ref<SensorState | null>(null);
   const gamepad = ref<GamepadState | null>(null);
   const hardware = ref<HardwareStatus | null>(null);
-  const contactThreshold = ref(2048);
-  const contactPolarity = ref<ContactPolarity>('active_high');
+  const contactCalibration = ref<ContactCalibration | null>(null);
+  const gaitHistory = shallowRef<GaitSample[]>([]);
+  const experiments = ref<ExperimentManifest[]>([]);
+  const experimentRunning = ref<ExperimentManifest | null>(null);
+  const lastExperimentSummary = ref<ExperimentSummary | null>(null);
   const stabilization = ref<StabilizationState | null>(null);
   const adaptiveWalk = ref<AdaptiveWalkState | null>(null);
   const telemetryRecording = ref<TelemetryRecordingStatus>({
@@ -143,18 +163,31 @@ export const useControlStore = defineStore('control', () => {
   );
   const connectedActuatorCount = computed(() => actuators.value.length);
   const contactLegStates = computed(() =>
-    deriveContactLegStates(sensors.value, contactThreshold.value, contactPolarity.value),
+    deriveContactLegStates(sensors.value, contactCalibration.value),
   );
   const supportingLegIds = computed(() =>
     contactLegStates.value.filter((state) => state.supporting).map((state) => state.legId),
   );
 
-  function setContactThreshold(value: number): void {
-    contactThreshold.value = Math.round(Math.max(0, Math.min(4095, value)));
+  async function saveContactCalibration(calibration: ContactCalibration): Promise<void> {
+    const response = await updateContactCalibration(calibration);
+    contactCalibration.value = calibration;
+    sensors.value = response.item;
   }
 
-  function setContactPolarity(value: ContactPolarity): void {
-    contactPolarity.value = value;
+  function appendGaitSample(sensorState: SensorState): void {
+    const contacts = Object.fromEntries(
+      sensorState.contact.map((state) => [state.leg, state.supporting]),
+    ) as Record<LegId, boolean>;
+    const walk = adaptiveWalk.value;
+    const sample: GaitSample = {
+      t: Date.now(),
+      phase: walk?.active ? walk.phase : null,
+      gateWaiting: walk?.gate_waiting ?? false,
+      walking: walk?.active ?? false,
+      contacts,
+    };
+    gaitHistory.value = [...gaitHistory.value, sample].slice(-GAIT_HISTORY_LIMIT);
   }
 
   function appendActuatorHistory(actuator: ActuatorState): void {
@@ -229,6 +262,7 @@ export const useControlStore = defineStore('control', () => {
 
     if (pendingSensors) {
       sensors.value = pendingSensors;
+      appendGaitSample(pendingSensors);
       pendingSensors = null;
     }
 
@@ -424,6 +458,13 @@ export const useControlStore = defineStore('control', () => {
       hardware.value = hardwareSnapshot.item;
       telemetryRecording.value = recordingStatus;
       syncSelectedTargets();
+      // Secondary state: never block the main snapshot on these.
+      void fetchContactCalibration()
+        .then((response) => {
+          contactCalibration.value = response.item;
+        })
+        .catch(() => undefined);
+      void refreshExperiments().catch(() => undefined);
     } finally {
       loading.value = false;
     }
@@ -585,11 +626,41 @@ export const useControlStore = defineStore('control', () => {
     await stopCsvPlayback();
   }
 
-  async function setForwardPressed(pressed: boolean, safetyConfirmed: boolean): Promise<void> {
+  async function setForwardPressed(
+    pressed: boolean,
+    safetyConfirmed: boolean,
+    options?: { cycles?: number | null; mode?: AdaptiveWalkMode },
+  ): Promise<void> {
     adaptiveWalk.value = await setAdaptiveForward({
       pressed,
       safety_confirmed: safetyConfirmed,
+      cycles: options?.cycles ?? null,
+      mode: options?.mode ?? 'adaptive',
     });
+  }
+
+  async function refreshExperiments(): Promise<void> {
+    const response = await listExperiments();
+    experiments.value = response.experiments;
+    experimentRunning.value = response.experiments.find((item) => !item.ended_at) ?? null;
+  }
+
+  async function beginExperiment(experimentType: string, name?: string): Promise<void> {
+    experimentRunning.value = await startExperiment({
+      experiment_type: experimentType,
+      name: name || null,
+    });
+    await refreshExperiments();
+  }
+
+  async function endExperiment(): Promise<void> {
+    lastExperimentSummary.value = await stopExperiment();
+    experimentRunning.value = null;
+    await refreshExperiments();
+  }
+
+  async function noteExperiment(text: string): Promise<void> {
+    await addExperimentNote(text);
   }
 
   async function moveHome(safetyConfirmed: boolean): Promise<void> {
@@ -746,11 +817,19 @@ export const useControlStore = defineStore('control', () => {
     applyStabilizationGains,
     cancelMagCalibration,
     capture,
+    beginExperiment,
     connectedActuatorCount,
+    contactCalibration,
     contactLegStates,
-    contactPolarity,
-    contactThreshold,
     dispose,
+    endExperiment,
+    experimentRunning,
+    experiments,
+    gaitHistory,
+    lastExperimentSummary,
+    noteExperiment,
+    refreshExperiments,
+    saveContactCalibration,
     finishMagCalibration,
     focusedLeg,
     focusedLegId,
@@ -764,8 +843,6 @@ export const useControlStore = defineStore('control', () => {
     motionLibrary,
     moveHome,
     sensors,
-    setContactPolarity,
-    setContactThreshold,
     setForwardPressed,
     setStabilizationEnabled,
     stabilization,

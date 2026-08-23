@@ -54,6 +54,11 @@ def _num(value: str | None) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def _num_or(value: str | None, default: float) -> float:
+    parsed = _num(value)
+    return default if parsed is None else parsed
+
+
 def load_run(run_dir: Path) -> dict:
     """Parse telemetry.csv into per-axis and per-tick series."""
     path = run_dir / "telemetry.csv"
@@ -71,6 +76,7 @@ def load_run(run_dir: Path) -> dict:
         "walk_active": [],
         "walk_phase": [],
         "walk_cycle": [],
+        "walk_scale": [],
     }
     contact: dict[str, list[float]] = {leg: [] for leg in CONTACT_LEGS}
     seen_ticks: set[str] = set()
@@ -99,23 +105,25 @@ def load_run(run_dir: Path) -> dict:
             series["actual"].append(actual)
             series["effective"].append(effective)
             if has_walk_cols:
-                series["rate_limited"].append(_num(row.get("walk_rate_limited")) or 0.0)
-                series["saturated"].append(_num(row.get("walk_saturated")) or 0.0)
+                series["rate_limited"].append(_num_or(row.get("walk_rate_limited"), 0.0))
+                series["saturated"].append(_num_or(row.get("walk_saturated"), 0.0))
 
             key = row["elapsed_ms"]
             if key in seen_ticks:
                 continue
             seen_ticks.add(key)
             ticks["t"].append(elapsed / 1000.0)
-            ticks["roll"].append(_num(row.get("control_roll")) or 0.0)
-            ticks["pitch"].append(_num(row.get("control_pitch")) or 0.0)
+            ticks["roll"].append(_num_or(row.get("control_roll"), 0.0))
+            ticks["pitch"].append(_num_or(row.get("control_pitch"), 0.0))
             if has_walk_cols:
-                ticks["walk_active"].append(_num(row.get("walk_active")) or 0.0)
-                ticks["walk_phase"].append(_num(row.get("walk_phase")) or -1.0)
-                ticks["walk_cycle"].append(_num(row.get("walk_cycle")) or -1.0)
+                ticks["walk_active"].append(_num_or(row.get("walk_active"), 0.0))
+                # -1 marks "not walking" ticks; 0.0 is a legitimate phase/cycle.
+                ticks["walk_phase"].append(_num_or(row.get("walk_phase"), -1.0))
+                ticks["walk_cycle"].append(_num_or(row.get("walk_cycle"), -1.0))
+                ticks["walk_scale"].append(_num_or(row.get("walk_motion_scale"), 0.0))
             if has_contact_cols:
                 for leg in CONTACT_LEGS:
-                    contact[leg].append(_num(row.get(f"contact_{leg}")) or 0.0)
+                    contact[leg].append(_num_or(row.get(f"contact_{leg}"), 0.0))
 
     return {
         "axes": axes,
@@ -216,20 +224,30 @@ def compute_metrics(run_dir: Path) -> dict:
     }
 
     cycles = None
-    if data["has_walk_cols"] and ticks["walk_cycle"]:
-        counted = [int(v) for v in ticks["walk_cycle"] if v >= 0]
-        if counted:
-            durations: list[float] = []
-            current, started = None, None
-            for t, value in zip(ticks["t"], ticks["walk_cycle"], strict=False):
-                if value < 0:
-                    continue
-                if current is None or int(value) != current:
-                    if current is not None and started is not None:
-                        durations.append(t - started)
-                    current, started = int(value), t
+    if data["has_walk_cols"] and ticks["walk_phase"]:
+        # Count phase wraps directly: the controller's final cycle increment
+        # lands after the last recorded sample, so the walk_cycle column
+        # under-reports by one on cycle-bounded runs.
+        # Only full-amplitude cycles count (matches the controller's rule of
+        # starting the cycle counter after the ramp completes).
+        full_scale = max(ticks["walk_scale"], default=0.0)
+        wrap_times: list[float] = []
+        previous_phase: float | None = None
+        for t, phase, scale in zip(
+            ticks["t"], ticks["walk_phase"], ticks["walk_scale"], strict=False
+        ):
+            if phase < 0 or scale < full_scale - 1e-6:
+                previous_phase = None
+                continue
+            if previous_phase is not None and phase < previous_phase:
+                wrap_times.append(t)
+            previous_phase = phase
+        if any(phase >= 0 for phase in ticks["walk_phase"]):
+            durations = [
+                b - a for a, b in zip(wrap_times, wrap_times[1:], strict=False)
+            ]
             cycles = {
-                "completed": max(counted),
+                "completed": len(wrap_times),
                 "duration_mean_s": statistics.fmean(durations) if durations else None,
                 "duration_stdev_s": (
                     statistics.stdev(durations) if len(durations) > 1 else None

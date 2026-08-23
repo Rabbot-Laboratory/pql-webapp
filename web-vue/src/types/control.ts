@@ -178,6 +178,7 @@ export interface SensorState {
   enabled: boolean;
   imu: Bmx055State;
   adc_banks: AdcBankState[];
+  contact: ServerContactLegState[];
   updated_at: string;
 }
 
@@ -195,6 +196,8 @@ export interface GamepadState {
   updated_at: string;
 }
 
+export type AdaptiveWalkMode = 'adaptive' | 'replay';
+
 export interface AdaptiveWalkState {
   active: boolean;
   auto_stopped: boolean;
@@ -208,7 +211,55 @@ export interface AdaptiveWalkState {
   roll_trim: number;
   pitch_trim: number;
   learned_phase_lead_s: number[];
+  mode: AdaptiveWalkMode;
+  cycle_count: number;
+  target_cycles: number | null;
+  gate_waiting: boolean;
+  saturated_axes: boolean[];
+  rate_limited_axes: boolean[];
   updated_at: string;
+}
+
+export type ContactPolarity = 'active_high' | 'active_low';
+
+export interface ServerContactLegState {
+  leg: LegId;
+  raw: number | null;
+  voltage: number | null;
+  supporting: boolean;
+}
+
+export interface ContactLegCalibration {
+  leg: LegId;
+  channel: number;
+  on_threshold: number;
+  off_threshold: number;
+  polarity: ContactPolarity;
+}
+
+export interface ContactCalibration {
+  device: number;
+  debounce_ticks: number;
+  legs: ContactLegCalibration[];
+}
+
+export interface ExperimentManifest {
+  experiment_id: string;
+  experiment_type: string;
+  name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  sample_rate_hz?: number;
+  row_counts?: { telemetry_rows?: number; event_count?: number } | null;
+}
+
+export interface ExperimentSummary {
+  manifest: ExperimentManifest;
+  duration_sec: number;
+  telemetry_rows: number;
+  event_count: number;
+  telemetry_bytes: number;
+  directory: string;
 }
 
 export interface WebGamepadUpdate {

@@ -1,6 +1,10 @@
 import type {
+  AdaptiveWalkMode,
   AdaptiveWalkState,
   ActuatorState,
+  ContactCalibration,
+  ExperimentManifest,
+  ExperimentSummary,
   FixedMotion,
   GamepadState,
   HardwareStatus,
@@ -106,12 +110,55 @@ export async function fetchAdaptiveWalk(): Promise<AdaptiveWalkState> {
 export async function setAdaptiveForward(payload: {
   pressed: boolean;
   safety_confirmed: boolean;
+  cycles?: number | null;
+  mode?: AdaptiveWalkMode;
 }): Promise<AdaptiveWalkState> {
   return readJson<AdaptiveWalkState>('/api/control/adaptive-walk/forward', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchContactCalibration(): Promise<{ item: ContactCalibration }> {
+  return readJson<{ item: ContactCalibration }>('/api/sensors/contact-calibration');
+}
+
+export async function updateContactCalibration(
+  calibration: ContactCalibration,
+): Promise<{ item: SensorState }> {
+  return readJson<{ item: SensorState }>('/api/sensors/contact-calibration', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(calibration),
+  });
+}
+
+export async function startExperiment(payload: {
+  experiment_type: string;
+  name?: string | null;
+}): Promise<ExperimentManifest> {
+  return readJson<ExperimentManifest>('/api/experiments/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function stopExperiment(): Promise<ExperimentSummary> {
+  return readJson<ExperimentSummary>('/api/experiments/stop', { method: 'POST' });
+}
+
+export async function addExperimentNote(text: string): Promise<{ ts: string; text: string }> {
+  return readJson<{ ts: string; text: string }>('/api/experiments/note', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function listExperiments(): Promise<{ experiments: ExperimentManifest[] }> {
+  return readJson<{ experiments: ExperimentManifest[] }>('/api/experiments');
 }
 
 export async function updateStabilization(payload: {

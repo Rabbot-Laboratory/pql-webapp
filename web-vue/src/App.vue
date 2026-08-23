@@ -15,6 +15,8 @@ import { useToast } from 'primevue/usetoast';
 import ActuatorControlPanel from '@/components/ActuatorControlPanel.vue';
 import ActuatorTable from '@/components/ActuatorTable.vue';
 import ContactSensorPanel from '@/components/ContactSensorPanel.vue';
+import ExperimentPanel from '@/components/ExperimentPanel.vue';
+import GaitDiagramPanel from '@/components/GaitDiagramPanel.vue';
 import FocusedLegView from '@/components/FocusedLegView.vue';
 import GamepadPanel from '@/components/GamepadPanel.vue';
 import HardwareNotice from '@/components/HardwareNotice.vue';
@@ -618,6 +620,10 @@ onBeforeUnmount(() => {
 
           <TabPanel value="motion" class="flex-1 overflow-auto">
             <MotionControlPanel />
+            <section v-if="store.activeTab === 'motion'" class="motion-extras">
+              <GaitDiagramPanel />
+              <ExperimentPanel />
+            </section>
           </TabPanel>
 
           <TabPanel value="contacts" class="flex-1 overflow-auto">
@@ -628,13 +634,11 @@ onBeforeUnmount(() => {
                 :legs="store.legs"
                 :sensors="store.sensors"
                 :states="store.contactLegStates"
-                :threshold="store.contactThreshold"
-                :polarity="store.contactPolarity"
+                :calibration="store.contactCalibration"
                 :imu-quaternion="store.sensors?.imu.quaternion ?? null"
                 :imu-orientation="store.sensors?.imu.orientation ?? null"
                 @update:focused-leg-id="store.selectLeg"
-                @update:threshold="store.setContactThreshold"
-                @update:polarity="store.setContactPolarity"
+                @save="(calibration) => store.saveContactCalibration(calibration)"
               />
             </section>
           </TabPanel>

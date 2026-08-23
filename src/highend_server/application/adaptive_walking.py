@@ -329,6 +329,7 @@ class AdaptiveWalkingController:
         self._task: asyncio.Task[None] | None = None
         self._active = False
         self._auto_stopped = False
+        self._requires_release = False
         self._stopped_reason: str | None = None
         self._lease_deadline = 0.0
         self._walk_started_at = 0.0
@@ -401,6 +402,7 @@ class AdaptiveWalkingController:
         mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE,
     ) -> AdaptiveWalkState:
         if not pressed:
+            self._requires_release = False
             await self.release("button released")
             return self.get_state()
         if not safety_confirmed:
@@ -410,6 +412,10 @@ class AdaptiveWalkingController:
         if self._active:
             self._lease_deadline = now + self.settings.adaptive_walk_lease_timeout_sec
             return self.get_state()
+        if self._requires_release:
+            # A held button keeps sending keepalives after an automatic stop
+            # (e.g. "cycle target reached"); those must never restart the walk.
+            raise RuntimeError("release the forward button before starting a new walk")
         if self._stabilization_engaged():
             raise RuntimeError("disable standalone stabilization before adaptive walking")
         if self._control.system_status.connection_state is not ConnectionState.CONNECTED:
@@ -493,6 +499,8 @@ class AdaptiveWalkingController:
         self._active = False
         self._current_motion_scale = 0.0
         self._gate_waiting = False
+        if automatic:
+            self._requires_release = True
         # A late pointer-up may arrive after an automatic stop. Preserve the
         # actionable safety reason instead of overwriting it with "released".
         if was_active or automatic:

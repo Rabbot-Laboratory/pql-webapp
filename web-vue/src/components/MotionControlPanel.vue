@@ -12,7 +12,13 @@ import Textarea from 'primevue/textarea';
 import { useToast } from 'primevue/usetoast';
 
 import { useControlStore } from '@/stores/control';
-import type { MotionCategory, MotionLibraryItem, PlaybackAdvanceMode } from '@/types/control';
+import type {
+  AdaptiveWalkMode,
+  MotionCategory,
+  MotionLibraryItem,
+  PlaybackAdvanceMode,
+} from '@/types/control';
+import { legLabel } from '@/utils/i18n';
 
 const store = useControlStore();
 const toast = useToast();
@@ -38,6 +44,34 @@ const teachingStartedAt = ref<number | null>(null);
 const walkSafetyConfirmed = ref(false);
 const forwardHeld = ref(false);
 const forwardBusy = ref(false);
+const walkMode = ref<AdaptiveWalkMode>('adaptive');
+const walkCycles = ref<number | null>(null);
+
+const walkModeOptions: Array<{ label: string; value: AdaptiveWalkMode }> = [
+  { label: '適応', value: 'adaptive' },
+  { label: '素再生', value: 'replay' },
+];
+const walkCycleOptions: Array<{ label: string; value: number | null }> = [
+  { label: '連続', value: null },
+  { label: '1周期', value: 1 },
+  { label: '3周期', value: 3 },
+];
+// Serial/control axis order (pql_a00_kinematics.ACTUATOR_HEIGHT_EFFECTS).
+const WALK_AXIS_LABELS = ['右前股', '右前膝', '左前股', '左前膝', '右後股', '右後膝', '左後股', '左後膝'];
+// Mirrors adaptive_walk_max_phase_lead_s's default; display scale only.
+const WALK_MAX_PHASE_LEAD_S = 0.2;
+
+const walkAxisRows = computed(() => {
+  const walk = store.adaptiveWalk;
+  if (!walk) return [];
+  return walk.learned_phase_lead_s.map((lead, index) => ({
+    label: WALK_AXIS_LABELS[index] ?? `#${index}`,
+    lead,
+    leadRatio: Math.min(1, lead / WALK_MAX_PHASE_LEAD_S),
+    saturated: walk.saturated_axes[index] ?? false,
+    rateLimited: walk.rate_limited_axes[index] ?? false,
+  }));
+});
 
 let teachingTimer: number | null = null;
 let forwardKeepaliveTimer: number | null = null;
@@ -99,7 +133,10 @@ const walkStatusSeverity = computed(() => {
 });
 
 async function sendForwardState(pressed: boolean): Promise<void> {
-  const request = store.setForwardPressed(pressed, pressed && walkSafetyConfirmed.value);
+  const request = store.setForwardPressed(pressed, pressed && walkSafetyConfirmed.value, {
+    cycles: walkCycles.value,
+    mode: walkMode.value,
+  });
   forwardRequest = request;
   try {
     await request;
@@ -584,6 +621,29 @@ onBeforeUnmount(() => {
               </label>
             </div>
 
+            <div class="adaptive-walk-run-options">
+              <label class="field compact-field">
+                <span>制御モード</span>
+                <SelectButton
+                  v-model="walkMode"
+                  :options="walkModeOptions"
+                  option-label="label"
+                  option-value="value"
+                  :disabled="forwardHeld || store.adaptiveWalk?.active"
+                />
+              </label>
+              <label class="field compact-field">
+                <span>サイクル数（指定時は自動停止・自動記録）</span>
+                <SelectButton
+                  v-model="walkCycles"
+                  :options="walkCycleOptions"
+                  option-label="label"
+                  option-value="value"
+                  :disabled="forwardHeld || store.adaptiveWalk?.active"
+                />
+              </label>
+            </div>
+
             <Button
               class="forward-hold-button"
               :class="{ 'is-held': forwardHeld || store.adaptiveWalk?.active }"
@@ -609,6 +669,15 @@ onBeforeUnmount(() => {
               <Tag :severity="walkStatusSeverity" :value="walkStatusLabel" />
               <Tag :severity="imuReady ? 'success' : 'danger'" :value="imuReady ? 'IMU READY' : 'IMU NOT READY'" />
               <Tag severity="info" :value="`振幅 ${((store.adaptiveWalk?.motion_scale ?? 0) * 100).toFixed(0)}%`" />
+              <Tag
+                severity="info"
+                :value="`${store.adaptiveWalk?.mode === 'replay' ? '素再生' : '適応'} / サイクル ${store.adaptiveWalk?.cycle_count ?? 0}${store.adaptiveWalk?.target_cycles ? ' / ' + store.adaptiveWalk.target_cycles : ''}`"
+              />
+              <Tag
+                v-if="store.adaptiveWalk?.gate_waiting"
+                severity="warn"
+                value="接地ゲート待ち"
+              />
             </div>
             <dl class="adaptive-walk-metrics">
               <div>
@@ -623,7 +692,36 @@ onBeforeUnmount(() => {
                 <dt>歩行位相</dt>
                 <dd>{{ ((store.adaptiveWalk?.phase ?? 0) * 100).toFixed(0) }}%</dd>
               </div>
+              <div>
+                <dt>接地</dt>
+                <dd class="adaptive-walk-contact-dots">
+                  <span
+                    v-for="state in store.contactLegStates"
+                    :key="state.legId"
+                    class="contact-dot"
+                    :class="{ 'is-supporting': state.supporting }"
+                    :title="legLabel(state.legId)"
+                  >
+                    {{ legLabel(state.legId).charAt(0) }}
+                  </span>
+                </dd>
+              </div>
             </dl>
+            <div v-if="walkAxisRows.length" class="adaptive-walk-axis-list">
+              <div v-for="row in walkAxisRows" :key="row.label" class="adaptive-walk-axis-row">
+                <span class="adaptive-walk-axis-label">{{ row.label }}</span>
+                <span class="adaptive-walk-lead-track">
+                  <span
+                    class="adaptive-walk-lead-bar"
+                    :class="{ 'is-maxed': row.leadRatio >= 0.95 }"
+                    :style="{ width: `${(row.leadRatio * 100).toFixed(0)}%` }"
+                  />
+                </span>
+                <span class="adaptive-walk-lead-value">{{ (row.lead * 1000).toFixed(0) }}ms</span>
+                <Tag v-if="row.saturated" severity="danger" value="端" class="axis-flag-tag" />
+                <Tag v-else-if="row.rateLimited" severity="warn" value="速度制限" class="axis-flag-tag" />
+              </div>
+            </div>
             <p v-if="store.adaptiveWalk?.stopped_reason" class="adaptive-walk-stop-reason">
               停止理由: {{ store.adaptiveWalk.stopped_reason }}
             </p>
