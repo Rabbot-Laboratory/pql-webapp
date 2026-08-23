@@ -11,9 +11,13 @@ import argparse
 import json
 import math
 import sys
+import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
+
+POSITION_LIMIT_MAX = 4095
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -278,6 +282,168 @@ def cmd_experiment_note(base_url: str, text: str) -> int:
 
 
 # --------------------------------------------------------------------------
+# axis characterization (Stage 1D of the walking-fix plan)
+# --------------------------------------------------------------------------
+
+CHARACTERIZE_MAX_AMPLITUDE = 500
+CHARACTERIZE_SAMPLE_INTERVAL_S = 0.03
+
+
+def _read_position(base_url: str, axis: int) -> int:
+    item = api_get(base_url, f"/api/actuators/{axis}").get("item") or {}
+    return int((item.get("telemetry") or {}).get("position", 2048))
+
+
+def _set_position(base_url: str, axis: int, value: int) -> None:
+    api_post(
+        base_url,
+        f"/api/actuators/{axis}/target",
+        {"mode": "position", "value": int(value)},
+    )
+
+
+def _sample_step(
+    base_url: str, axis: int, target: int, settle_sec: float
+) -> list[tuple[float, int]]:
+    """Command one step and sample (t, actual_position) until settle_sec."""
+    trace: list[tuple[float, int]] = [(0.0, _read_position(base_url, axis))]
+    _set_position(base_url, axis, target)
+    started = time.monotonic()
+    while True:
+        now = time.monotonic() - started
+        trace.append((now, _read_position(base_url, axis)))
+        if now >= settle_sec:
+            return trace
+        time.sleep(CHARACTERIZE_SAMPLE_INTERVAL_S)
+
+
+def _step_metrics(trace: list[tuple[float, int]], target: int) -> dict:
+    start_pos = trace[0][1]
+    span = target - start_pos
+    if span == 0:
+        return {"skipped": "zero span"}
+    final_pos = trace[-1][1]
+
+    def crossing(fraction: float) -> float | None:
+        threshold = start_pos + span * fraction
+        for t, pos in trace:
+            if (span > 0 and pos >= threshold) or (span < 0 and pos <= threshold):
+                return t
+        return None
+
+    t10, t63, t90 = crossing(0.10), crossing(0.63), crossing(0.90)
+    velocity = None
+    if t10 is not None and t90 is not None and t90 > t10:
+        velocity = abs(span) * 0.8 / (t90 - t10)
+    progresses = [(pos - start_pos) / span for _, pos in trace]
+    overshoot = max(0.0, max(progresses) - 1.0)
+    return {
+        "start": start_pos,
+        "target": target,
+        "final": final_pos,
+        "dead_time_s": t10,
+        "t63_s": t63,
+        "t90_s": t90,
+        "velocity_units_per_s": velocity,
+        "overshoot_fraction": overshoot,
+        "final_error": abs(target - final_pos),
+        "reached_90pct": t90 is not None,
+    }
+
+
+def _aggregate_steps(steps: list[dict]) -> dict:
+    valid = [step for step in steps if "skipped" not in step]
+
+    def mean_of(key: str) -> float | None:
+        values = [step[key] for step in valid if step.get(key) is not None]
+        return sum(values) / len(values) if values else None
+
+    return {
+        "repeats": len(valid),
+        "dead_time_s": mean_of("dead_time_s"),
+        "t63_s": mean_of("t63_s"),
+        "t90_s": mean_of("t90_s"),
+        "velocity_units_per_s": mean_of("velocity_units_per_s"),
+        "overshoot_fraction": mean_of("overshoot_fraction"),
+        "final_error": mean_of("final_error"),
+        "reached_90pct_count": sum(1 for step in valid if step.get("reached_90pct")),
+        "steps": steps,
+    }
+
+
+def cmd_characterize(
+    base_url: str,
+    axis: int,
+    amplitude: int,
+    repeats: int,
+    settle_sec: float,
+    output: Path,
+    assume_yes: bool,
+) -> int:
+    if not 0 <= axis <= 7:
+        print("[NG] axis must be 0..7")
+        return 1
+    if not 0 < amplitude <= CHARACTERIZE_MAX_AMPLITUDE:
+        print(f"[NG] amplitude must be 1..{CHARACTERIZE_MAX_AMPLITUDE} (safety cap)")
+        return 1
+
+    start_pos = _read_position(base_url, axis)
+    high = min(POSITION_LIMIT_MAX, start_pos + amplitude)
+    low = start_pos
+    print(
+        f"axis {axis}: step {low} <-> {high} x{repeats} "
+        f"(settle {settle_sec:.1f}s per step)"
+    )
+    if not assume_yes:
+        answer = input("The cylinder WILL move. Continue? [y/N] ").strip().lower()
+        if answer != "y":
+            print("aborted")
+            return 1
+
+    extend_steps: list[dict] = []
+    contract_steps: list[dict] = []
+    try:
+        for repeat in range(repeats):
+            print(f"  repeat {repeat + 1}/{repeats}: extend...", flush=True)
+            extend_steps.append(_step_metrics(_sample_step(base_url, axis, high, settle_sec), high))
+            print(f"  repeat {repeat + 1}/{repeats}: contract...", flush=True)
+            contract_steps.append(_step_metrics(_sample_step(base_url, axis, low, settle_sec), low))
+    finally:
+        # Always command back to the starting position.
+        _set_position(base_url, axis, start_pos)
+
+    result = {
+        "amplitude": amplitude,
+        "settle_sec": settle_sec,
+        "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "extend": _aggregate_steps(extend_steps),
+        "contract": _aggregate_steps(contract_steps),
+    }
+
+    existing: dict = {}
+    if output.exists():
+        try:
+            existing = json.loads(output.read_text(encoding="utf-8"))
+        except ValueError:
+            print(f"[warn] {output} was unreadable; overwriting")
+    existing.setdefault("axes", {})[str(axis)] = result
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+
+    for direction in ("extend", "contract"):
+        agg = result[direction]
+        print(
+            f"  {direction}: dead={_fmt_optional(agg['dead_time_s'])}s "
+            f"t63={_fmt_optional(agg['t63_s'])}s "
+            f"v={_fmt_optional(agg['velocity_units_per_s'], 0)}u/s "
+            f"overshoot={_fmt_optional(agg['overshoot_fraction'])} "
+            f"err={_fmt_optional(agg['final_error'], 0)}"
+        )
+    print(f"wrote {output}")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # argparse wiring
 # --------------------------------------------------------------------------
 
@@ -314,6 +480,33 @@ def build_parser() -> argparse.ArgumentParser:
     note_parser = experiment_sub.add_parser("note", help="Append a note to the running experiment")
     note_parser.add_argument("text", nargs="+", help="Note text (joined with spaces)")
 
+    characterize_parser = subparsers.add_parser(
+        "characterize",
+        help="Step-response identification of one axis (dead time, t63, velocity)",
+    )
+    characterize_parser.add_argument("--axis", type=int, required=True, help="Actuator id 0..7")
+    characterize_parser.add_argument(
+        "--amplitude",
+        type=int,
+        default=300,
+        help=f"Step size in target units (default 300, max {CHARACTERIZE_MAX_AMPLITUDE})",
+    )
+    characterize_parser.add_argument(
+        "--repeats", type=int, default=3, help="Extend/contract repetitions (default 3)"
+    )
+    characterize_parser.add_argument(
+        "--settle", type=float, default=3.0, help="Seconds to sample after each step (default 3)"
+    )
+    characterize_parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("config/axis_characterization.json"),
+        help="JSON file merged per axis (default config/axis_characterization.json)",
+    )
+    characterize_parser.add_argument(
+        "--yes", action="store_true", help="Skip the interactive motion confirmation"
+    )
+
     return parser
 
 
@@ -330,6 +523,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_stabilization_status(base_url)
     if args.command == "preflight":
         return cmd_preflight(base_url)
+    if args.command == "characterize":
+        return cmd_characterize(
+            base_url,
+            axis=args.axis,
+            amplitude=args.amplitude,
+            repeats=args.repeats,
+            settle_sec=args.settle,
+            output=args.output,
+            assume_yes=args.yes,
+        )
     if args.command == "experiment":
         if args.experiment_command == "start":
             return cmd_experiment_start(base_url, args.experiment_type, args.name)
