@@ -70,6 +70,15 @@ class RabbitBoundGait:
             raise ValueError("duty_factor must be in [0.35, 1.0)")
         self.config = config
         self._neutral = tuple(leg.foot_yz(np.zeros(2)) for leg in LEGS)
+        # Subclasses may override these to express other gaits with the same
+        # swing/stance trajectory machinery.
+        self._phase_offsets: tuple[float, float, float, float] = (
+            0.0,
+            0.5,
+            config.rear_phase_offset,
+            config.rear_phase_offset,
+        )
+        self._rear_kick_enabled = True
 
     def _amplitude(self, time_s: float) -> float:
         if time_s <= self.config.startup_s:
@@ -79,8 +88,7 @@ class RabbitBoundGait:
     def foot_offset(self, leg_index: int, time_s: float) -> NDArray[np.float64]:
         amplitude = self._amplitude(time_s)
         phase_time = max(0.0, time_s - self.config.startup_s)
-        phase_offsets = (0.0, 0.5, self.config.rear_phase_offset, self.config.rear_phase_offset)
-        phase = (phase_time / self.config.cycle_s + phase_offsets[leg_index]) % 1.0
+        phase = (phase_time / self.config.cycle_s + self._phase_offsets[leg_index]) % 1.0
         swing_fraction = 1.0 - self.config.duty_factor
         rear_push = 0.0
 
@@ -90,7 +98,7 @@ class RabbitBoundGait:
             lift = sin(pi * progress)
         else:
             progress = (phase - swing_fraction) / self.config.duty_factor
-            if leg_index >= 2:
+            if self._rear_kick_enabled and leg_index >= 2:
                 rear_push = sin(pi * progress) * self.config.rear_push_m
                 progress = min(1.0, progress / self.config.rear_kick_fraction)
             forward = 0.5 - _smoothstep(progress)
@@ -138,3 +146,26 @@ class RabbitBoundGait:
         after = self.angles(time_s + epsilon, foot_height_m)
         velocity = (after - before) / (2.0 * epsilon)
         return angles, velocity
+
+
+class PhaseOffsetGait(RabbitBoundGait):
+    """The same swing/stance foot trajectory with arbitrary per-leg phasing.
+
+    Covers crawl / trot / pace / bound / pronk by choosing ``phase_offsets``
+    (FR, FL, RR, RL as cycle fractions) and the duty factor. The rabbit
+    bound's rear-kick compression is disabled by default: these gaits push
+    evenly through the whole stance.
+    """
+
+    def __init__(
+        self,
+        config: GaitConfig,
+        phase_offsets: tuple[float, float, float, float],
+        *,
+        rear_kick: bool = False,
+    ) -> None:
+        super().__init__(config)
+        if len(phase_offsets) != 4:
+            raise ValueError("phase_offsets must contain one value per leg")
+        self._phase_offsets = tuple(float(offset) % 1.0 for offset in phase_offsets)
+        self._rear_kick_enabled = rear_kick

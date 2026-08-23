@@ -97,7 +97,13 @@ class SimulationConfig:
 
 
 def default_config_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "config" / "pneumatic_sim.json"
+    config_dir = Path(__file__).resolve().parents[3] / "config"
+    local = config_dir / "pneumatic_sim.json"
+    if local.exists():
+        return local
+    # Committed hardware-measured parameters (2026-08-23 bang probe) as the
+    # fallback when no machine-local tuning file exists.
+    return config_dir / "pneumatic_sim.measured.json"
 
 
 def load_simulation_config(path: str | Path | None = None) -> SimulationConfig:

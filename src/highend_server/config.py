@@ -158,6 +158,9 @@ class Settings(BaseSettings):
         default=0.5, gt=0.0, le=5.0
     )
     adaptive_walk_max_tilt_deg: float = Field(default=12.0, gt=0.0, le=45.0)
+    # Fixed Motion CSV played by the walk button (gait_lab candidates:
+    # walk_crawl / walk_trot_slow / walk_rabbit_v3 / walk_pronk / walk_bound_lowamp).
+    adaptive_walk_motion_name: str = Field(default="rabbit_bound", min_length=1)
     # Rear-driven rabbit bound reaches the full known motion range gradually;
     # the independent target-rate limit remains the final hardware guard.
     adaptive_walk_motion_scale: float = Field(default=1.0, gt=0.0, le=1.0)

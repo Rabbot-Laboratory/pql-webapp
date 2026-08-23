@@ -432,13 +432,16 @@ class AdaptiveWalkingController:
         ):
             raise RuntimeError("robot tilt exceeds adaptive walking start limit")
 
-        detail = self._control.get_motion_file(MotionCategory.FIXED, "rabbit_bound")
+        motion_name = self.settings.adaptive_walk_motion_name
+        detail = self._control.get_motion_file(MotionCategory.FIXED, motion_name)
         rows = tuple(
             tuple(float(value) for value in row[: self.settings.actuator_count])
             for row in detail.rows
         )
         if not rows or any(len(row) != self.settings.actuator_count for row in rows):
-            raise RuntimeError("fixed rabbit_bound motion must contain all actuator targets")
+            raise RuntimeError(
+                f"fixed motion '{motion_name}' must contain all actuator targets"
+            )
 
         await self._control.claim_adaptive_walking()
         self._rows = rows
