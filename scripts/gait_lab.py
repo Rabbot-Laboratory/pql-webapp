@@ -121,18 +121,20 @@ def _add(pattern: str, cycles: list[float], strides: list[float], **kw) -> None:
     ]
 
 
-# Grids sized to the measured axis speeds: the slowest axis (RR knee,
-# 456 units/s) needs swing times >= ~1.5 s, so cycles are long and strides
-# small. duty is lowered where support allows to buy swing time.
-_add("crawl", [12.0, 16.0, 20.0], [0.03, 0.04], duty=0.75, lift_m=0.015,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("trot_slow", [8.0, 12.0, 16.0], [0.03, 0.04], duty=0.60, lift_m=0.015,
+# Final five candidates (2026-08-23 exploration; see the report for the
+# search history). Key insight: with the measured axis speeds the only recipe
+# that advances is LONG cycle x LARGE stride; quasi-static small strides
+# cancel out, and rabbit-kick / pronk waveforms exceed the slowest axes by
+# 1.5-2.5x even at 16 s cycles.
+_add("trot20", [20.0], [0.10], duty=0.60, lift_m=0.030,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
-_add("rabbit_v3", [8.0, 12.0, 16.0], [0.03, 0.04], duty=0.75, lift_m=0.020,
-     phase_offsets=None)
-_add("pronk", [6.0, 9.0, 12.0], [0.015, 0.025], duty=0.70, lift_m=0.020,
-     phase_offsets=(0.0, 0.0, 0.0, 0.0))
-_add("bound_lowamp", [8.0, 12.0, 16.0], [0.02, 0.03], duty=0.65, lift_m=0.015,
+_add("trot16", [16.0], [0.08], duty=0.60, lift_m=0.025,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
+_add("trot_safe", [16.0], [0.06], duty=0.60, lift_m=0.020,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
+_add("crawl", [20.0], [0.08], duty=0.75, lift_m=0.020,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("bound_lowamp", [16.0], [0.06], duty=0.65, lift_m=0.020,
      phase_offsets=(0.0, 0.0, 0.5, 0.5))
 
 
@@ -270,7 +272,7 @@ def main() -> int:
             }
             # The sim enforces the measured speed caps itself, so marginal
             # candidates are judged by physics; prune only the hopeless.
-            if ratio > 1.15:
+            if ratio > 1.30:
                 print(f"[skip] {pattern} cycle={candidate.cycle_s}s stride={candidate.stride_m} "
                       f"infeasible (axis {worst_axis} needs {ratio:.2f}x measured speed)")
                 results.append(entry)
