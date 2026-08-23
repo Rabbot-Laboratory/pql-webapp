@@ -82,7 +82,10 @@ def main() -> None:
         best = min(results, key=lambda item: item["score"])
         api(f"/api/actuators/{axis}/gain", {"p": best["p"], "i": best["i"], "d": 0})
         report[axis] = {"label": label, "best": best, "all": results}
-        print(f"# axis {axis} ({label}) best P={best['p']} I={best['i']} score={best['score']}", flush=True)
+        print(
+            f"# axis {axis} ({label}) best P={best['p']} I={best['i']} score={best['score']}",
+            flush=True,
+        )
     print(json.dumps(report, ensure_ascii=False))
 
 
