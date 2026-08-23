@@ -1,7 +1,9 @@
-import numpy as np
+import pytest
 
-from highend_server.simulation.config import GaitConfig
-from highend_server.simulation.gait import RabbitBoundGait
+np = pytest.importorskip("numpy")  # simulation extra; not a base dependency
+
+from highend_server.simulation.config import GaitConfig  # noqa: E402
+from highend_server.simulation.gait import RabbitBoundGait  # noqa: E402
 
 
 def test_rabbit_bound_holds_neutral_during_startup() -> None:

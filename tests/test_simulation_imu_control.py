@@ -1,9 +1,11 @@
 from math import cos, radians, sin
 
-import numpy as np
+import pytest
 
-from highend_server.simulation.config import AdaptiveAttitudeControlConfig, ImuConfig
-from highend_server.simulation.imu_control import (
+np = pytest.importorskip("numpy")  # simulation extra; not a base dependency
+
+from highend_server.simulation.config import AdaptiveAttitudeControlConfig, ImuConfig  # noqa: E402
+from highend_server.simulation.imu_control import (  # noqa: E402
     AdaptiveImuGaitController,
     ImuSample,
     SimulatedImu,
