@@ -42,6 +42,7 @@ from highend_server.domain.models import (
     ExperimentManifest,
     ExperimentNoteRequest,
     ExperimentStartRequest,
+    ExperimentStatus,
     ExperimentSummary,
     FixedMotionRequest,
     HealthResponse,
@@ -606,6 +607,13 @@ async def download_latest_telemetry_log(
     return FileResponse(path=path, media_type="text/csv", filename=path.name)
 
 
+@router.get("/experiments/status", response_model=ExperimentStatus)
+async def get_experiment_status(
+    recorder: ExperimentRecorder = Depends(get_experiment_recorder),
+) -> ExperimentStatus:
+    return recorder.status()
+
+
 @router.post("/experiments/start", response_model=ExperimentManifest)
 async def start_experiment(
     request: ExperimentStartRequest,
@@ -675,6 +683,9 @@ async def websocket_stream(websocket: WebSocket) -> None:
     standing_controller: StandingController | None = getattr(
         websocket.app.state, "standing_controller", None
     )
+    experiment_recorder: ExperimentRecorder | None = getattr(
+        websocket.app.state, "experiment_recorder", None
+    )
     await manager.connect(websocket)
     try:
         await websocket.send_json(
@@ -703,6 +714,11 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     "standing": (
                         standing_controller.get_state().model_dump(mode="json")
                         if standing_controller is not None
+                        else None
+                    ),
+                    "experiment": (
+                        experiment_recorder.status().model_dump(mode="json")
+                        if experiment_recorder is not None
                         else None
                     ),
                     "gamepad": (

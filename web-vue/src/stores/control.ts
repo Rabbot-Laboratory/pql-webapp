@@ -10,6 +10,7 @@ import {
   deleteMotionFile,
   fetchAdaptiveWalk,
   fetchContactCalibration,
+  fetchExperimentStatus,
   listExperiments,
   startExperiment,
   stopExperiment,
@@ -53,6 +54,7 @@ import type {
   ContactCalibration,
   ControlMode,
   ExperimentManifest,
+  ExperimentStatus,
   ExperimentSummary,
   FixedMotion,
   GamepadState,
@@ -132,6 +134,9 @@ export const useControlStore = defineStore('control', () => {
   const gaitHistory = shallowRef<GaitSample[]>([]);
   const experiments = ref<ExperimentManifest[]>([]);
   const experimentRunning = ref<ExperimentManifest | null>(null);
+  // Live recorder status: recordings started by the API or by a
+  // cycle-bounded walk must show up here too, not just GUI-started ones.
+  const experimentStatus = ref<ExperimentStatus | null>(null);
   const lastExperimentSummary = ref<ExperimentSummary | null>(null);
   const stabilization = ref<StabilizationState | null>(null);
   const standing = ref<StandingState | null>(null);
@@ -310,6 +315,7 @@ export const useControlStore = defineStore('control', () => {
         sensors?: SensorState;
         stabilization?: StabilizationState;
         standing?: StandingState;
+        experiment?: ExperimentStatus;
         adaptive_walk?: AdaptiveWalkState;
         gamepad?: GamepadState;
         hardware?: HardwareStatus;
@@ -323,6 +329,7 @@ export const useControlStore = defineStore('control', () => {
       sensors.value = payload.sensors ?? null;
       stabilization.value = payload.stabilization ?? null;
       standing.value = payload.standing ?? null;
+      experimentStatus.value = payload.experiment ?? null;
       adaptiveWalk.value = payload.adaptive_walk ?? null;
       gamepad.value = payload.gamepad ?? null;
       hardware.value = payload.hardware ?? null;
@@ -414,6 +421,15 @@ export const useControlStore = defineStore('control', () => {
       return;
     }
 
+    if (event.type === 'experiment_state') {
+      const payload = (event.payload as { experiment?: ExperimentStatus } | null)?.experiment;
+      if (payload) {
+        experimentStatus.value = payload;
+        void refreshExperiments().catch(() => undefined);
+      }
+      return;
+    }
+
     if (event.type === 'standing_state') {
       const standingPayload = (event.payload as { standing?: StandingState } | null)?.standing;
       if (standingPayload) {
@@ -481,6 +497,11 @@ export const useControlStore = defineStore('control', () => {
         })
         .catch(() => undefined);
       void refreshExperiments().catch(() => undefined);
+      void fetchExperimentStatus()
+        .then((status) => {
+          experimentStatus.value = status;
+        })
+        .catch(() => undefined);
     } finally {
       loading.value = false;
     }
@@ -852,6 +873,7 @@ export const useControlStore = defineStore('control', () => {
     dispose,
     endExperiment,
     experimentRunning,
+    experimentStatus,
     experiments,
     gaitHistory,
     lastExperimentSummary,

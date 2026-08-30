@@ -272,6 +272,15 @@ export interface ExperimentManifest {
   row_counts?: { telemetry_rows?: number; event_count?: number } | null;
 }
 
+export interface ExperimentStatus {
+  running: boolean;
+  experiment_id: string | null;
+  directory: string | null;
+  elapsed_sec: number | null;
+  telemetry_rows: number;
+  event_count: number;
+}
+
 export interface ExperimentSummary {
   manifest: ExperimentManifest;
   duration_sec: number;

@@ -51,14 +51,16 @@ def create_app() -> FastAPI:
     settings = get_settings()
     websocket_manager = WebSocketManager()
     gateway = build_gateway(settings)
-    # Recorder is created before the services so its event tee can be wired into
-    # each service's event_sink at construction time. It is late-bound to the
-    # services (recorder.bind) once they exist.
-    experiment_recorder = ExperimentRecorder(settings=settings)
-
     async def event_sink(event: TelemetryEvent) -> None:
         await websocket_manager.broadcast(event)
         experiment_recorder.observe_event(event)
+
+    # Recorder is created before the services so its event tee can be wired into
+    # each service's event_sink at construction time. It is late-bound to the
+    # services (recorder.bind) once they exist. The sink is also handed back to
+    # the recorder so it can broadcast its own start/stop state; "experiment_state"
+    # is deliberately absent from _TEED_EVENT_TYPES so it never logs itself.
+    experiment_recorder = ExperimentRecorder(settings=settings, event_sink=event_sink)
 
     control_service = ControlService(
         settings=settings, gateway=gateway, event_sink=event_sink

@@ -18,7 +18,13 @@ const experimentName = ref('');
 const noteText = ref('');
 const busy = ref(false);
 
-const running = computed(() => store.experimentRunning);
+// Live recorder status wins: recordings started via the API or by a
+// cycle-bounded walk must show here too.
+const status = computed(() => store.experimentStatus);
+const running = computed(() => status.value?.running === true);
+const runningId = computed(
+  () => status.value?.experiment_id ?? store.experimentRunning?.experiment_id ?? null,
+);
 const recentExperiments = computed(() => store.experiments.slice(0, 8));
 
 onMounted(() => {
@@ -75,11 +81,11 @@ function addNote(): void {
       <div class="experiment-controls">
         <label class="field compact-field">
           <span>タイプ</span>
-          <InputText v-model="experimentType" :disabled="running !== null" placeholder="walk-tuning" />
+          <InputText v-model="experimentType" :disabled="running" placeholder="walk-tuning" />
         </label>
         <label class="field compact-field">
           <span>名前（任意）</span>
-          <InputText v-model="experimentName" :disabled="running !== null" />
+          <InputText v-model="experimentName" :disabled="running" />
         </label>
         <Button
           v-if="!running"
@@ -98,8 +104,13 @@ function addNote(): void {
           @click="stop"
         />
         <Tag
+          v-if="running && status"
+          severity="info"
+          :value="`${status.telemetry_rows} 行 / ${(status.elapsed_sec ?? 0).toFixed(0)} 秒`"
+        />
+        <Tag
           :severity="running ? 'danger' : 'secondary'"
-          :value="running ? `記録中: ${running.experiment_id}` : '待機中'"
+          :value="running ? `記録中: ${runningId}` : '待機中'"
         />
       </div>
 

@@ -26,7 +26,7 @@ import math
 import os
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -229,9 +229,19 @@ def _fmt_gain(value: float) -> str:
 class ExperimentRecorder:
     """Owns the lifecycle and IO of a single experiment run at a time."""
 
-    def __init__(self, settings: Settings, *, time_fn: Callable[[], float] = monotonic) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        time_fn: Callable[[], float] = monotonic,
+        event_sink: Callable[[TelemetryEvent], Awaitable[None]] | None = None,
+    ) -> None:
         self._settings = settings
         self._time_fn = time_fn
+        # Outbound sink so the browser learns about recordings it did not
+        # start itself (API calls, cycle-bounded walks). Never add
+        # "experiment_state" to _TEED_EVENT_TYPES or it would log itself.
+        self._event_sink = event_sink
         self._lock = asyncio.Lock()
         self._attitude_frame = AttitudeControlFrame(
             roll_sign=settings.stabilization_roll_sign,
@@ -332,7 +342,8 @@ class ExperimentRecorder:
             self._sample_task = asyncio.create_task(
                 self._sample_loop(), name="experiment-sampler"
             )
-            return manifest
+        await self._publish_status()
+        return manifest
 
     async def stop(self) -> ExperimentSummary:
         async with self._lock:
@@ -349,7 +360,9 @@ class ExperimentRecorder:
                 await task
 
         async with self._lock:
-            return self._finalize_locked()
+            summary = self._finalize_locked()
+        await self._publish_status()
+        return summary
 
     async def shutdown(self) -> None:
         """Stop a running experiment if any; no-op when idle (lifespan finally)."""
@@ -542,6 +555,16 @@ class ExperimentRecorder:
             return {"experiment_id": self._experiment_id, "ts": ts, "text": text}
 
     # -- introspection -----------------------------------------------------
+
+    async def _publish_status(self) -> None:
+        if self._event_sink is None:
+            return
+        await self._event_sink(
+            TelemetryEvent(
+                type="experiment_state",
+                payload={"experiment": self.status().model_dump(mode="json")},
+            )
+        )
 
     def status(self) -> ExperimentStatus:
         if not self._running:

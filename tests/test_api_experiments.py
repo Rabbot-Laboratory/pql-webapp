@@ -156,3 +156,19 @@ def test_latest_404_when_empty(client: TestClient) -> None:
     latest = client.get("/api/experiments/latest")
     assert latest.status_code == 200
     assert latest.json()["experiment_type"] == "a"
+
+
+def test_experiment_status_route_tracks_lifecycle(client: TestClient) -> None:
+    idle = client.get("/api/experiments/status")
+    assert idle.status_code == 200
+    assert idle.json()["running"] is False
+
+    started = client.post("/api/experiments/start", json={"experiment_type": "status-check"})
+    assert started.status_code == 200
+    running = client.get("/api/experiments/status").json()
+    assert running["running"] is True
+    assert running["experiment_id"] == started.json()["experiment_id"]
+    assert running["directory"]
+
+    client.post("/api/experiments/stop")
+    assert client.get("/api/experiments/status").json()["running"] is False

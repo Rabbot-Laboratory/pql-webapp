@@ -4,6 +4,7 @@ import type {
   ActuatorState,
   ContactCalibration,
   ExperimentManifest,
+  ExperimentStatus,
   ExperimentSummary,
   FixedMotion,
   GamepadState,
@@ -189,6 +190,10 @@ export async function addExperimentNote(text: string): Promise<{ ts: string; tex
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
+}
+
+export async function fetchExperimentStatus(): Promise<ExperimentStatus> {
+  return readJson<ExperimentStatus>('/api/experiments/status');
 }
 
 export async function listExperiments(): Promise<{ experiments: ExperimentManifest[] }> {
