@@ -122,31 +122,40 @@ def _add(pattern: str, cycles: list[float], strides: list[float], **kw) -> None:
     ]
 
 
-# Candidates. The 2026-08-30 free-play run is the reference point:
-# walk_crawl (20 s, 8 cm stride, 2 cm lift) actually carried the robot ~40 cm
-# over ~6.5 cycles. Two operator observations drive the additions below:
-#   * the knees barely contribute - the crawl only commands 4-5 deg of knee
-#     travel against 6-7 deg of hip, so lift_m is raised to make the knees do
-#     real work (knee angle comes from the foot-height part of the IK),
-#   * it should go faster - the loaded log shows the axes move in bursts well
-#     above the commanded slope, so shorter cycles are worth testing even
-#     though the feasibility ratio rises.
+# Candidates. Hardware evidence beats the simulation ranking here.
+#
+# 2026-08-30 free-play (run 20260830_091959_freeplay4) walked the same crawl
+# shape at three cycle times and measured the total distance each axis
+# actually travelled per second:
+#     20 s -> 4833 units/s   (FR hip pinned at its end 42% of the time)
+#     12 s -> 7714 units/s   (pinned 20%)
+#      8 s -> 10190 units/s  (pinned 0%)  <- operator: "walked best"
+# The valve dead zone means an axis only moves once the error is large, so a
+# faster command produces MORE real motion, not less, and keeps axes off
+# their mechanical ends. The simulation predicts the opposite (it models a
+# tracking actuator, not a dead-zone burst one), so these short-cycle
+# candidates ship on hardware evidence; the sim number is kept as a fall/
+# stability check only.
+_add("crawl_fast8", [8.0], [0.06], duty=0.75, lift_m=0.030,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast8big", [8.0], [0.09], duty=0.75, lift_m=0.040,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast6", [6.0], [0.07], duty=0.75, lift_m=0.035,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast4", [4.0], [0.06], duty=0.75, lift_m=0.030,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("trot_fast8", [8.0], [0.07], duty=0.60, lift_m=0.030,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("crawl", [20.0], [0.08], duty=0.75, lift_m=0.020,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("crawl_knee", [20.0], [0.08], duty=0.75, lift_m=0.045,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("crawl_fast", [12.0], [0.08], duty=0.75, lift_m=0.035,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("crawl_fast8", [8.0], [0.06], duty=0.75, lift_m=0.030,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("trot20", [20.0], [0.10], duty=0.60, lift_m=0.030,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("trot16", [16.0], [0.08], duty=0.60, lift_m=0.025,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
-_add("trot_safe", [16.0], [0.06], duty=0.60, lift_m=0.020,
-     phase_offsets=(0.0, 0.5, 0.5, 0.0))
-_add("bound_lowamp", [16.0], [0.06], duty=0.65, lift_m=0.020,
-     phase_offsets=(0.0, 0.0, 0.5, 0.5))
 
 
 def build_gait(candidate: Candidate, base: GaitConfig):
@@ -285,7 +294,7 @@ def main() -> int:
             # let physics judge anything remotely plausible. The 2026-08-30
             # hardware run walked 40 cm at feasibility 1.11, i.e. the
             # steady-state ratio alone is not a veto.
-            if ratio > 4.00:
+            if ratio > 12.00:
                 print(f"[skip] {pattern} cycle={candidate.cycle_s}s stride={candidate.stride_m} "
                       f"infeasible (axis {worst_axis} needs {ratio:.2f}x measured speed)")
                 results.append(entry)
