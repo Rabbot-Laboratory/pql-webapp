@@ -347,6 +347,7 @@ class AdaptiveWalkingController:
         self._last_publish_at = 0.0
         self._request_lock = asyncio.Lock()
         self._mode = AdaptiveWalkMode.ADAPTIVE
+        self._motion_name = settings.adaptive_walk_motion_name
         self._target_cycles: int | None = None
         self._cycle_count = 0
         self._cycle_counting = False
@@ -387,6 +388,7 @@ class AdaptiveWalkingController:
         safety_confirmed: bool,
         cycles: int | None = None,
         mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE,
+        motion_name: str | None = None,
     ) -> AdaptiveWalkState:
         async with self._request_lock:
             return await self._set_forward_pressed_locked(
@@ -394,6 +396,7 @@ class AdaptiveWalkingController:
                 safety_confirmed=safety_confirmed,
                 cycles=cycles,
                 mode=mode,
+                motion_name=motion_name,
             )
 
     async def _set_forward_pressed_locked(
@@ -403,6 +406,7 @@ class AdaptiveWalkingController:
         safety_confirmed: bool,
         cycles: int | None = None,
         mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE,
+        motion_name: str | None = None,
     ) -> AdaptiveWalkState:
         if not pressed:
             self._requires_release = False
@@ -443,7 +447,7 @@ class AdaptiveWalkingController:
                 "(enable standing, or set HIGHEND_ADAPTIVE_WALK_REQUIRE_STANDING=0)"
             )
 
-        motion_name = self.settings.adaptive_walk_motion_name
+        motion_name = motion_name or self.settings.adaptive_walk_motion_name
         detail = self._control.get_motion_file(MotionCategory.FIXED, motion_name)
         rows = tuple(
             tuple(float(value) for value in row[: self.settings.actuator_count])
@@ -481,6 +485,7 @@ class AdaptiveWalkingController:
         self._last_step_at = None
         self._current_motion_scale = 0.0
         self._mode = mode
+        self._motion_name = motion_name
         self._target_cycles = cycles
         self._cycle_count = 0
         self._cycle_counting = False
@@ -551,6 +556,7 @@ class AdaptiveWalkingController:
             pitch_trim=self._memory.pitch_trim,
             learned_phase_lead_s=list(self._memory.phase_leads_s),
             mode=self._mode,
+            motion_name=self._motion_name,
             cycle_count=self._cycle_count,
             target_cycles=self._target_cycles,
             gate_waiting=self._gate_waiting,

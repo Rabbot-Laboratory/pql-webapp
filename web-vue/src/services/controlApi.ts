@@ -144,6 +144,7 @@ export async function setAdaptiveForward(payload: {
   safety_confirmed: boolean;
   cycles?: number | null;
   mode?: AdaptiveWalkMode;
+  motion_name?: string | null;
 }): Promise<AdaptiveWalkState> {
   return readJson<AdaptiveWalkState>('/api/control/adaptive-walk/forward', {
     method: 'POST',

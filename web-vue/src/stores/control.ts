@@ -645,13 +645,14 @@ export const useControlStore = defineStore('control', () => {
   async function setForwardPressed(
     pressed: boolean,
     safetyConfirmed: boolean,
-    options?: { cycles?: number | null; mode?: AdaptiveWalkMode },
+    options?: { cycles?: number | null; mode?: AdaptiveWalkMode; motionName?: string | null },
   ): Promise<void> {
     adaptiveWalk.value = await setAdaptiveForward({
       pressed,
       safety_confirmed: safetyConfirmed,
       cycles: options?.cycles ?? null,
       mode: options?.mode ?? 'adaptive',
+      motion_name: options?.motionName ?? null,
     });
   }
 

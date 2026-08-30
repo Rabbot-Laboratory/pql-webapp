@@ -678,3 +678,28 @@ async def _standing_gate_scenario(tmp_path: Path) -> None:
     finally:
         await controller.release()
         await control.shutdown()
+
+
+def test_walk_motion_name_request_overrides_setting(tmp_path: Path) -> None:
+    asyncio.run(_motion_name_override_scenario(tmp_path))
+
+
+async def _motion_name_override_scenario(tmp_path: Path) -> None:
+    motion_root = _write_walk_motion(tmp_path)
+    (motion_root / "Fixed Motion" / "walk_trot16.csv").write_text(
+        "# interval_sec=0.05\n# loop=true\n"
+        "2048,2048,2048,2048,2048,2048,2048,2048\n"
+        "2100,2000,2000,2100,2048,2048,2048,2048\n",
+        encoding="utf-8",
+    )
+    controller, control, _clock, _events = _make_walk_controller(tmp_path)
+    await control.connect()
+    try:
+        state = await controller.set_forward_pressed(
+            True, safety_confirmed=True, motion_name="walk_trot16"
+        )
+        assert state.motion_name == "walk_trot16"
+        assert controller._interval_s == pytest.approx(0.05)
+    finally:
+        await controller.release()
+        await control.shutdown()

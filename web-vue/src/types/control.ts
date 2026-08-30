@@ -228,6 +228,7 @@ export interface AdaptiveWalkState {
   pitch_trim: number;
   learned_phase_lead_s: number[];
   mode: AdaptiveWalkMode;
+  motion_name: string;
   cycle_count: number;
   target_cycles: number | null;
   gate_waiting: boolean;

@@ -374,6 +374,7 @@ async def set_adaptive_walk_forward(
             safety_confirmed=request.safety_confirmed,
             cycles=request.cycles,
             mode=request.mode,
+            motion_name=request.motion_name,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

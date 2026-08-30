@@ -1,7 +1,7 @@
 """Measured-hardware gait search: simulate candidate gaits and export CSVs.
 
-Uses the 2026-08-23 bang-probe measurements (per-axis speeds and onset
-delays) three ways:
+Uses the bang-probe measurements (per-axis speeds and onset delays;
+latest 2026-08-30 after leg re-adjustment) three ways:
   1. the MuJoCo pneumatic model runs with the measured parameters
      (config/pneumatic_sim.measured.json via the loader fallback),
   2. candidates whose commanded waveform exceeds the measured axis speeds
@@ -40,22 +40,23 @@ from highend_server.simulation.runner import PqlA00Simulation, SimulationResult 
 NEUTRAL_UNITS = 2047.5
 HIP_TRAVEL_RAD = np.radians(16.0)
 KNEE_TRAVEL_RAD = np.radians(24.0)
-# direction: all hips -1, all knees +1 (joint_preview.py:20-39)
-AXIS_DIRECTION = (-1.0, +1.0) * 4
+# direction: all hips +1, all knees -1 (joint_preview.py, hardware-verified 2026-08-30)
+AXIS_DIRECTION = (+1.0, -1.0) * 4
 AXIS_TRAVEL_RAD = (HIP_TRAVEL_RAD, KNEE_TRAVEL_RAD) * 4
 
-# --- measured hardware limits (2026-08-23 bang probe, medians of 5 reps) -----
-# "up" = increasing target (cylinder extend), units/s; onset in seconds.
-# Axis 0 (FR hip) was broken during the probe: mirrored from axis 2 (FL hip).
+# --- measured hardware limits (2026-08-30 bang probe after leg re-adjustment,
+# medians of 5 reps; all 8 axes alive). "up" = increasing target (cylinder
+# extend), units/s; onset in seconds. Weak retract side on axes 0/6 shows as
+# lower down_ups.
 MEASURED = {
-    0: {"up_ups": 681, "down_ups": 646, "onset_s": 0.236},
-    1: {"up_ups": 1182, "down_ups": 1209, "onset_s": 0.171},
-    2: {"up_ups": 681, "down_ups": 646, "onset_s": 0.236},
-    3: {"up_ups": 882, "down_ups": 882, "onset_s": 0.145},
-    4: {"up_ups": 522, "down_ups": 526, "onset_s": 0.249},
-    5: {"up_ups": 456, "down_ups": 488, "onset_s": 0.237},
-    6: {"up_ups": 587, "down_ups": 563, "onset_s": 0.240},
-    7: {"up_ups": 776, "down_ups": 703, "onset_s": 0.266},
+    0: {"up_ups": 519, "down_ups": 563, "onset_s": 0.079},
+    1: {"up_ups": 813, "down_ups": 819, "onset_s": 0.176},
+    2: {"up_ups": 705, "down_ups": 605, "onset_s": 0.180},
+    3: {"up_ups": 725, "down_ups": 726, "onset_s": 0.209},
+    4: {"up_ups": 609, "down_ups": 418, "onset_s": 0.243},
+    5: {"up_ups": 558, "down_ups": 500, "onset_s": 0.173},
+    6: {"up_ups": 521, "down_ups": 344, "onset_s": 0.205},
+    7: {"up_ups": 521, "down_ups": 530, "onset_s": 0.148},
 }
 FEASIBILITY_LIMIT = 0.7  # commanded slope must stay under 70% of measured speed
 INTERVAL_S = 0.04

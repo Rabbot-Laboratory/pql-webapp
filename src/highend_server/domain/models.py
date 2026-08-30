@@ -579,6 +579,8 @@ class AdaptiveWalkRequest(BaseModel):
     # amplitude ramp completes.
     cycles: int | None = Field(default=None, ge=1, le=10)
     mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE
+    # Fixed Motion CSV to play; None = settings.adaptive_walk_motion_name.
+    motion_name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class HomePoseRequest(BaseModel):
@@ -604,6 +606,7 @@ class AdaptiveWalkState(BaseModel):
     pitch_trim: float = 0.0
     learned_phase_lead_s: list[float] = Field(default_factory=list)
     mode: AdaptiveWalkMode = AdaptiveWalkMode.ADAPTIVE
+    motion_name: str = "rabbit_bound"
     cycle_count: int = 0
     target_cycles: int | None = None
     gate_waiting: bool = False

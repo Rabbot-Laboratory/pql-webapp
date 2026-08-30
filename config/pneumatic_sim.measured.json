@@ -43,9 +43,9 @@
   },
   "actuators": {
     "rev_fr2": {
-      "delay_s": 0.236,
-      "extend_speed_rad_s": 0.0881,
-      "retract_speed_rad_s": 0.0929,
+      "delay_s": 0.079,
+      "extend_speed_rad_s": 0.0768,
+      "retract_speed_rad_s": 0.0708,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0409,
       "kp_nm_rad": 175.0,
@@ -53,9 +53,9 @@
       "max_torque_nm": 35.0
     },
     "rev_fr3": {
-      "delay_s": 0.171,
-      "extend_speed_rad_s": 0.2418,
-      "retract_speed_rad_s": 0.2473,
+      "delay_s": 0.176,
+      "extend_speed_rad_s": 0.1663,
+      "retract_speed_rad_s": 0.1676,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0614,
       "kp_nm_rad": 190.0,
@@ -63,9 +63,9 @@
       "max_torque_nm": 35.0
     },
     "rev_fl2": {
-      "delay_s": 0.236,
-      "extend_speed_rad_s": 0.0881,
-      "retract_speed_rad_s": 0.0929,
+      "delay_s": 0.18,
+      "extend_speed_rad_s": 0.0825,
+      "retract_speed_rad_s": 0.0962,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0409,
       "kp_nm_rad": 170.0,
@@ -73,9 +73,9 @@
       "max_torque_nm": 35.0
     },
     "rev_fl3": {
-      "delay_s": 0.145,
-      "extend_speed_rad_s": 0.1804,
-      "retract_speed_rad_s": 0.1804,
+      "delay_s": 0.209,
+      "extend_speed_rad_s": 0.1483,
+      "retract_speed_rad_s": 0.1485,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0614,
       "kp_nm_rad": 185.0,
@@ -83,9 +83,9 @@
       "max_torque_nm": 35.0
     },
     "rev_rr2": {
-      "delay_s": 0.249,
-      "extend_speed_rad_s": 0.0717,
-      "retract_speed_rad_s": 0.0712,
+      "delay_s": 0.243,
+      "extend_speed_rad_s": 0.057,
+      "retract_speed_rad_s": 0.0831,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0409,
       "kp_nm_rad": 180.0,
@@ -93,9 +93,9 @@
       "max_torque_nm": 35.0
     },
     "rev_rr3": {
-      "delay_s": 0.237,
-      "extend_speed_rad_s": 0.0933,
-      "retract_speed_rad_s": 0.0998,
+      "delay_s": 0.173,
+      "extend_speed_rad_s": 0.1142,
+      "retract_speed_rad_s": 0.1023,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0614,
       "kp_nm_rad": 195.0,
@@ -103,9 +103,9 @@
       "max_torque_nm": 35.0
     },
     "rev_rl2": {
-      "delay_s": 0.24,
-      "extend_speed_rad_s": 0.0768,
-      "retract_speed_rad_s": 0.0801,
+      "delay_s": 0.205,
+      "extend_speed_rad_s": 0.0469,
+      "retract_speed_rad_s": 0.0711,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0409,
       "kp_nm_rad": 168.0,
@@ -113,9 +113,9 @@
       "max_torque_nm": 35.0
     },
     "rev_rl3": {
-      "delay_s": 0.266,
-      "extend_speed_rad_s": 0.1588,
-      "retract_speed_rad_s": 0.1438,
+      "delay_s": 0.148,
+      "extend_speed_rad_s": 0.1066,
+      "retract_speed_rad_s": 0.1084,
       "time_constant_s": 0.12,
       "deadband_rad": 0.0614,
       "kp_nm_rad": 182.0,

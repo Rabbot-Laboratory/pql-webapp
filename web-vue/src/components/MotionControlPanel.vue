@@ -6,6 +6,7 @@ import Card from 'primevue/card';
 import Checkbox from 'primevue/checkbox';
 import InputNumber from 'primevue/inputnumber';
 import InputText from 'primevue/inputtext';
+import Select from 'primevue/select';
 import SelectButton from 'primevue/selectbutton';
 import Tag from 'primevue/tag';
 import Textarea from 'primevue/textarea';
@@ -46,6 +47,16 @@ const forwardHeld = ref(false);
 const forwardBusy = ref(false);
 const walkMode = ref<AdaptiveWalkMode>('adaptive');
 const walkCycles = ref<number | null>(null);
+const walkMotion = ref<string | null>(null);
+// Walk-capable fixed motions: gait_lab candidates plus the tuned rabbit bound.
+const walkMotionOptions = computed(() =>
+  store.motionLibrary.fixed
+    .filter((item) => item.name.startsWith('walk_') || item.name === 'rabbit_bound')
+    .map((item) => ({ label: `${item.name} (${item.frame_count}f)`, value: item.name })),
+);
+const selectedWalkMotion = computed(
+  () => walkMotion.value ?? store.adaptiveWalk?.motion_name ?? 'rabbit_bound',
+);
 
 const walkModeOptions: Array<{ label: string; value: AdaptiveWalkMode }> = [
   { label: '適応', value: 'adaptive' },
@@ -140,6 +151,7 @@ async function sendForwardState(pressed: boolean): Promise<void> {
   const request = store.setForwardPressed(pressed, pressed && walkSafetyConfirmed.value, {
     cycles: walkCycles.value,
     mode: walkMode.value,
+    motionName: selectedWalkMotion.value,
   });
   forwardRequest = request;
   try {
@@ -627,6 +639,17 @@ onBeforeUnmount(() => {
 
             <div class="adaptive-walk-run-options">
               <label class="field compact-field">
+                <span>歩容(Fixed Motion)</span>
+                <Select
+                  :model-value="selectedWalkMotion"
+                  :options="walkMotionOptions"
+                  option-label="label"
+                  option-value="value"
+                  :disabled="forwardHeld || store.adaptiveWalk?.active"
+                  @update:model-value="(value: string) => (walkMotion = value)"
+                />
+              </label>
+              <label class="field compact-field">
                 <span>制御モード</span>
                 <SelectButton
                   v-model="walkMode"
@@ -675,7 +698,7 @@ onBeforeUnmount(() => {
               <Tag severity="info" :value="`振幅 ${((store.adaptiveWalk?.motion_scale ?? 0) * 100).toFixed(0)}%`" />
               <Tag
                 severity="info"
-                :value="`${store.adaptiveWalk?.mode === 'replay' ? '素再生' : '適応'} / サイクル ${store.adaptiveWalk?.cycle_count ?? 0}${store.adaptiveWalk?.target_cycles ? ' / ' + store.adaptiveWalk.target_cycles : ''}`"
+                :value="`${store.adaptiveWalk?.motion_name ?? ''} / ${store.adaptiveWalk?.mode === 'replay' ? '素再生' : '適応'} / サイクル ${store.adaptiveWalk?.cycle_count ?? 0}${store.adaptiveWalk?.target_cycles ? ' / ' + store.adaptiveWalk.target_cycles : ''}`"
               />
               <Tag
                 v-if="store.adaptiveWalk?.gate_waiting"
