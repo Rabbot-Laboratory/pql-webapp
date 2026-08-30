@@ -19,6 +19,7 @@ from highend_server.application.joint_preview import (
     build_leg_previews,
     leg_id_for_actuator,
 )
+from highend_server.application.position_filter import PositionSpikeFilter
 from highend_server.config import Settings
 from highend_server.domain.models import (
     POSITION_MAX,
@@ -160,6 +161,15 @@ class ControlService:
         # target updates on the same pneumatic actuators.
         # Exclusive position-target owner: "adaptive walking" / "standing" / None.
         self._motion_owner: str | None = None
+        # Potentiometer noise gate (see application/position_filter.py).
+        self._position_filter = (
+            PositionSpikeFilter(
+                settings.actuator_count,
+                max_speed_units_s=settings.position_filter_max_speed,
+            )
+            if settings.position_filter_max_speed > 0
+            else None
+        )
         self._playback_status = PlaybackStatus.IDLE
         self._current_motion_name: str | None = None
         self._current_motion_category: MotionCategory | None = None
@@ -593,7 +603,12 @@ class ControlService:
             global_index = self._global_index(envelope.port_role, decoded.actuator_index)
             async with self._lock:
                 actuator = self._actuators[global_index]
-                actuator.telemetry.position = decoded.position
+                position = decoded.position
+                if self._position_filter is not None:
+                    position = self._position_filter.filter(
+                        global_index, position, self._time_fn()
+                    )
+                actuator.telemetry.position = position
                 actuator.telemetry.voltage = decoded.voltage
                 actuator.telemetry.command = decoded.command
                 actuator.telemetry.pressure = decoded.pressure

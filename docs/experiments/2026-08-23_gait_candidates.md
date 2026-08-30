@@ -8,18 +8,24 @@
 
 | pattern | cycle_s | stride_m | feas(worst axis) | forward/cycle | pitch mean | fallen | score |
 |---|---|---|---|---|---|---|---|
+| crawl | 20.0 | 0.08 | 1.11 (ax0) | +1.3 cm | 0.72° | no | 0.0114 |
+| crawl_knee | 20.0 | 0.08 | 2.03 (ax6) | +1.2 cm | 1.74° | no | 0.0077 |
+| crawl_fast | 12.0 | 0.08 | 2.62 (ax6) | +0.2 cm | 1.16° | no | -0.0012 |
+| crawl_fast8 | 8.0 | 0.06 | 3.34 (ax6) | -0.1 cm | 0.77° | no | -0.0030 |
 | trot20 | 20.0 | 0.1 | 0.91 (ax6) | +10.3 cm | 1.14° | no | 0.1006 |
 | trot16 | 16.0 | 0.08 | 0.91 (ax6) | +6.4 cm | 0.87° | no | 0.0626 |
 | trot_safe | 16.0 | 0.06 | 0.73 (ax6) | +1.6 cm | 0.73° | no | 0.0148 |
-| crawl | 20.0 | 0.08 | 1.11 (ax0) | +1.3 cm | 0.72° | no | 0.0114 |
 | bound_lowamp | 16.0 | 0.06 | 0.82 (ax6) | +0.5 cm | 0.27° | no | 0.0036 |
 
 ## 書き出した候補(パターン別ベスト)
 
+- `walk_crawl.csv` — cycle 20.0s, stride 0.08m, duty 0.75, +1.3 cm/cycle, feas 1.11
+- `walk_crawl_knee.csv` — cycle 20.0s, stride 0.08m, duty 0.75, +1.2 cm/cycle, feas 2.03
+- `walk_crawl_fast.csv` — cycle 12.0s, stride 0.08m, duty 0.75, +0.2 cm/cycle, feas 2.62
+- `walk_crawl_fast8.csv` — cycle 8.0s, stride 0.06m, duty 0.75, -0.1 cm/cycle, feas 3.34
 - `walk_trot20.csv` — cycle 20.0s, stride 0.1m, duty 0.6, +10.3 cm/cycle, feas 0.91
 - `walk_trot16.csv` — cycle 16.0s, stride 0.08m, duty 0.6, +6.4 cm/cycle, feas 0.91
 - `walk_trot_safe.csv` — cycle 16.0s, stride 0.06m, duty 0.6, +1.6 cm/cycle, feas 0.73
-- `walk_crawl.csv` — cycle 20.0s, stride 0.08m, duty 0.75, +1.3 cm/cycle, feas 1.11
 - `walk_bound_lowamp.csv` — cycle 16.0s, stride 0.06m, duty 0.65, +0.5 cm/cycle, feas 0.82
 
 各CSVは軸別に実測onset遅れぶん位相先行済み(`phase_advance_frames` ヘッダ)。

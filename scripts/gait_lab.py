@@ -122,19 +122,29 @@ def _add(pattern: str, cycles: list[float], strides: list[float], **kw) -> None:
     ]
 
 
-# Final five candidates (2026-08-23 exploration; see the report for the
-# search history). Key insight: with the measured axis speeds the only recipe
-# that advances is LONG cycle x LARGE stride; quasi-static small strides
-# cancel out, and rabbit-kick / pronk waveforms exceed the slowest axes by
-# 1.5-2.5x even at 16 s cycles.
+# Candidates. The 2026-08-30 free-play run is the reference point:
+# walk_crawl (20 s, 8 cm stride, 2 cm lift) actually carried the robot ~40 cm
+# over ~6.5 cycles. Two operator observations drive the additions below:
+#   * the knees barely contribute - the crawl only commands 4-5 deg of knee
+#     travel against 6-7 deg of hip, so lift_m is raised to make the knees do
+#     real work (knee angle comes from the foot-height part of the IK),
+#   * it should go faster - the loaded log shows the axes move in bursts well
+#     above the commanded slope, so shorter cycles are worth testing even
+#     though the feasibility ratio rises.
+_add("crawl", [20.0], [0.08], duty=0.75, lift_m=0.020,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_knee", [20.0], [0.08], duty=0.75, lift_m=0.045,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast", [12.0], [0.08], duty=0.75, lift_m=0.035,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast8", [8.0], [0.06], duty=0.75, lift_m=0.030,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("trot20", [20.0], [0.10], duty=0.60, lift_m=0.030,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("trot16", [16.0], [0.08], duty=0.60, lift_m=0.025,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("trot_safe", [16.0], [0.06], duty=0.60, lift_m=0.020,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
-_add("crawl", [20.0], [0.08], duty=0.75, lift_m=0.020,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("bound_lowamp", [16.0], [0.06], duty=0.65, lift_m=0.020,
      phase_offsets=(0.0, 0.0, 0.5, 0.5))
 
@@ -271,9 +281,11 @@ def main() -> int:
                 "score": float("-inf"),
                 "per_cycle_m": 0.0,
             }
-            # The sim enforces the measured speed caps itself, so marginal
-            # candidates are judged by physics; prune only the hopeless.
-            if ratio > 1.30:
+            # The sim's actuator model enforces the measured speed caps, so
+            # let physics judge anything remotely plausible. The 2026-08-30
+            # hardware run walked 40 cm at feasibility 1.11, i.e. the
+            # steady-state ratio alone is not a veto.
+            if ratio > 4.00:
                 print(f"[skip] {pattern} cycle={candidate.cycle_s}s stride={candidate.stride_m} "
                       f"infeasible (axis {worst_axis} needs {ratio:.2f}x measured speed)")
                 results.append(entry)

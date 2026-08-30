@@ -148,6 +148,12 @@ class Settings(BaseSettings):
         "error_difference"
     )
 
+    # --- Position feedback spike filter -------------------------------------
+    # Reject reported positions that imply a speed no cylinder can reach
+    # (measured full-stroke max was 819 units/s; noise spikes reach 2900
+    # units in one 40 ms tick). 0 disables the filter.
+    position_filter_max_speed: float = Field(default=1500.0, ge=0.0)
+
     # --- Standing hold (rise to the home pose, then actively keep it) -------
     standing_rate_hz: float = Field(default=25.0, gt=0.0, le=100.0)
     # Rise ramp speed toward the stand pose (same scale as home_motion_rate).
