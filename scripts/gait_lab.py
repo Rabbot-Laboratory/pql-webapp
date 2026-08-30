@@ -124,36 +124,37 @@ def _add(pattern: str, cycles: list[float], strides: list[float], **kw) -> None:
 
 # Candidates. Hardware evidence beats the simulation ranking here.
 #
-# 2026-08-30 free-play (run 20260830_091959_freeplay4) walked the same crawl
-# shape at three cycle times and measured the total distance each axis
-# actually travelled per second:
-#     20 s -> 4833 units/s   (FR hip pinned at its end 42% of the time)
-#     12 s -> 7714 units/s   (pinned 20%)
-#      8 s -> 10190 units/s  (pinned 0%)  <- operator: "walked best"
-# The valve dead zone means an axis only moves once the error is large, so a
-# faster command produces MORE real motion, not less, and keeps axes off
-# their mechanical ends. The simulation predicts the opposite (it models a
-# tracking actuator, not a dead-zone burst one), so these short-cycle
-# candidates ship on hardware evidence; the sim number is kept as a fall/
-# stability check only.
-_add("crawl_fast8", [8.0], [0.06], duty=0.75, lift_m=0.030,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+# Cross-run analysis of every walking segment on 2026-08-30 (freeplay ..
+# freeplay5) measured, per segment, how much the axes actually travelled and
+# how periodic the body attitude was at the gait frequency ("coherence" -
+# real weight shifting repeats once per cycle, vibration does not):
+#     walk_trot_fast8  8 s trot : roll 4.2 deg at coherence 0.80, rear-foot
+#                                 contact 27% - operator: "stable"
+#     walk_crawl_fast  12 s crawl: pitch coherence 0.65 but little travel
+#     walk_crawl_fast8big 8 s    : most travel (15150 u/s), least pinning 3.4%
+#     walk_crawl (20 s)          : coherence 0.25, axes pinned at their ends
+# Faster cycles beat slow ones (the valve dead zone means an axis only moves
+# once the error grows), and trot phasing beats crawl phasing for coherent
+# weight transfer. The family below crosses those two findings: trot phasing
+# at short cycles with the larger strides that kept axes off their ends.
+_add("trot_fast8big", [8.0], [0.09], duty=0.60, lift_m=0.035,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
+_add("trot_fast6", [6.0], [0.08], duty=0.60, lift_m=0.035,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
+_add("trot_fast5", [5.0], [0.07], duty=0.55, lift_m=0.030,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
+_add("trot_fast8", [8.0], [0.07], duty=0.60, lift_m=0.030,
+     phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("crawl_fast8big", [8.0], [0.09], duty=0.75, lift_m=0.040,
+     phase_offsets=(0.25, 0.75, 0.0, 0.5))
+_add("crawl_fast8", [8.0], [0.06], duty=0.75, lift_m=0.030,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("crawl_fast6", [6.0], [0.07], duty=0.75, lift_m=0.035,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
 _add("crawl_fast4", [4.0], [0.06], duty=0.75, lift_m=0.030,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("trot_fast8", [8.0], [0.07], duty=0.60, lift_m=0.030,
-     phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("crawl", [20.0], [0.08], duty=0.75, lift_m=0.020,
      phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("crawl_knee", [20.0], [0.08], duty=0.75, lift_m=0.045,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("crawl_fast", [12.0], [0.08], duty=0.75, lift_m=0.035,
-     phase_offsets=(0.25, 0.75, 0.0, 0.5))
-_add("trot20", [20.0], [0.10], duty=0.60, lift_m=0.030,
-     phase_offsets=(0.0, 0.5, 0.5, 0.0))
 _add("trot16", [16.0], [0.08], duty=0.60, lift_m=0.025,
      phase_offsets=(0.0, 0.5, 0.5, 0.0))
 
