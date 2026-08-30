@@ -202,6 +202,8 @@ export interface StandingState {
   enabled: boolean;
   phase: StandingPhase;
   standing_ok: boolean;
+  auto_ok: boolean;
+  manual_ok: boolean;
   walk_gate_enabled: boolean;
   auto_disabled: boolean;
   disabled_reason: string | null;

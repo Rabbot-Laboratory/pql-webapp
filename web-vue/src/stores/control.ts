@@ -663,6 +663,10 @@ export const useControlStore = defineStore('control', () => {
     });
   }
 
+  async function setStandingManualOk(value: boolean): Promise<void> {
+    standing.value = await updateStanding({ enabled: true, manual_ok: value });
+  }
+
   async function refreshExperiments(): Promise<void> {
     const response = await listExperiments();
     experiments.value = response.experiments;
@@ -869,6 +873,7 @@ export const useControlStore = defineStore('control', () => {
     sensors,
     setForwardPressed,
     setStandingEnabled,
+    setStandingManualOk,
     standing,
     setStabilizationEnabled,
     stabilization,

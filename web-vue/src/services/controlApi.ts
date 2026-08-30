@@ -127,6 +127,7 @@ export async function fetchStanding(): Promise<StandingState> {
 export async function updateStanding(payload: {
   enabled: boolean;
   safety_confirmed?: boolean;
+  manual_ok?: boolean;
 }): Promise<StandingState> {
   return readJson<StandingState>('/api/control/standing', {
     method: 'POST',

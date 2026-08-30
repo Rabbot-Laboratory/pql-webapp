@@ -135,10 +135,10 @@ def _write_home(tmp_path: Path) -> Path:
 
 
 def _make_standing(tmp_path: Path, *, stabilization_engaged=lambda: False, **overrides):
+    overrides.setdefault("standing_ok_hold_sec", 0.1)
     settings = Settings(
         emulate_devices=True,
         motion_root_dir=str(_write_home(tmp_path)),
-        standing_ok_hold_sec=0.1,
         stabilization_roll_sign=1,
         stabilization_pitch_sign=1,
         **overrides,
@@ -249,5 +249,81 @@ async def _handover_scenario(tmp_path: Path) -> None:
         # Ownership is free again: another claim must succeed.
         await control.claim_adaptive_walking()
         await control.release_adaptive_walking()
+    finally:
+        await control.shutdown()
+
+
+def test_manual_ok_opens_the_gate_and_clears_on_stop(tmp_path: Path) -> None:
+    asyncio.run(_manual_ok_scenario(tmp_path))
+
+
+async def _manual_ok_scenario(tmp_path: Path) -> None:
+    # standing_ok_hold_sec is huge so the automatic judgement never fires and
+    # only the operator override can open the gate.
+    controller, control, clock, _attitude_state, _events = _make_standing(
+        tmp_path, standing_ok_hold_sec=30.0
+    )
+    await control.connect()
+    try:
+        await controller.set_enabled(True, safety_confirmed=True)
+        clock.value += 0.04
+        await controller._step()
+        assert controller.standing_ok is False
+
+        state = await controller.set_manual_ok(True)
+        assert state.manual_ok is True
+        assert state.auto_ok is False
+        assert state.standing_ok is True
+        assert controller.standing_ok is True
+
+        # Disabling clears the approval; re-enabling must not inherit it.
+        await controller.set_enabled(False, safety_confirmed=False)
+        assert controller.get_state().manual_ok is False
+        await controller.set_enabled(True, safety_confirmed=True)
+        assert controller.get_state().manual_ok is False
+    finally:
+        await controller.set_enabled(False, safety_confirmed=False)
+        await control.shutdown()
+
+
+def test_manual_ok_requires_the_hold_to_be_running(tmp_path: Path) -> None:
+    asyncio.run(_manual_ok_guard_scenario(tmp_path))
+
+
+async def _manual_ok_guard_scenario(tmp_path: Path) -> None:
+    controller, control, _clock, _attitude_state, _events = _make_standing(tmp_path)
+    await control.connect()
+    try:
+        with pytest.raises(RuntimeError, match="enable the standing hold"):
+            await controller.set_manual_ok(True)
+    finally:
+        await control.shutdown()
+
+
+def test_manual_ok_cleared_by_handover_and_auto_stop(tmp_path: Path) -> None:
+    asyncio.run(_manual_ok_clear_scenario(tmp_path))
+
+
+async def _manual_ok_clear_scenario(tmp_path: Path) -> None:
+    controller, control, clock, attitude, _events = _make_standing(
+        tmp_path, standing_ok_hold_sec=30.0
+    )
+    await control.connect()
+    try:
+        await controller.set_enabled(True, safety_confirmed=True)
+        await controller.set_manual_ok(True)
+        await controller.release_for_handover()
+        assert controller.get_state().manual_ok is False
+
+        await controller.set_enabled(True, safety_confirmed=True)
+        await controller.set_manual_ok(True)
+        clock.value += 0.04
+        await controller._step()
+        attitude["roll"] = 20.0  # beyond standing_max_tilt_deg
+        clock.value += 0.04
+        await controller._step()
+        state = controller.get_state()
+        assert state.enabled is False
+        assert state.manual_ok is False
     finally:
         await control.shutdown()

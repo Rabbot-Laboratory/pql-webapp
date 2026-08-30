@@ -189,6 +189,9 @@ class StandingController:
         self._overdrive_active: tuple[bool, ...] = ()
         self._ok_since: float | None = None
         self._standing_ok = False
+        # Operator override: opens the walk gate when the automatic check
+        # cannot pass but the robot visibly stands. Cleared on every stop.
+        self._manual_ok = False
         self._last_publish_at = 0.0
         self._request_lock = asyncio.Lock()
 
@@ -217,13 +220,25 @@ class StandingController:
 
     @property
     def standing_ok(self) -> bool:
-        return self._enabled and self._standing_ok
+        return self._enabled and (self._standing_ok or self._manual_ok)
+
+    async def set_manual_ok(self, value: bool) -> StandingState:
+        """Operator-approve (or revoke) the standing state for the walk gate."""
+        async with self._request_lock:
+            if value and not self._enabled:
+                raise RuntimeError("enable the standing hold before approving it")
+            if self._manual_ok != value:
+                self._manual_ok = value
+                await self._publish(force=True)
+            return self.get_state()
 
     def get_state(self) -> StandingState:
         return StandingState(
             enabled=self._enabled,
             phase=self._phase,
             standing_ok=self.standing_ok,
+            auto_ok=self._enabled and self._standing_ok,
+            manual_ok=self._manual_ok,
             walk_gate_enabled=self.settings.adaptive_walk_require_standing,
             auto_disabled=self._auto_disabled,
             disabled_reason=self._disabled_reason,
@@ -238,6 +253,7 @@ class StandingController:
     async def set_enabled(self, enabled: bool, *, safety_confirmed: bool) -> StandingState:
         async with self._request_lock:
             if not enabled:
+                self._manual_ok = False
                 if self._enabled:
                     await self._disable("disabled by operator", automatic=False)
                 return self.get_state()
@@ -290,6 +306,7 @@ class StandingController:
             self._overdrive_active = ()
             self._ok_since = None
             self._standing_ok = False
+            self._manual_ok = False
             self._enabled = True
             self._auto_disabled = False
             self._disabled_reason = None
@@ -304,6 +321,7 @@ class StandingController:
         self._enabled = False
         self._phase = StandingPhase.OFF
         self._standing_ok = False
+        self._manual_ok = False
         self._ok_since = None
         self._disabled_reason = "handed over to walking"
         self._auto_disabled = False
@@ -315,6 +333,7 @@ class StandingController:
         self._enabled = False
         self._phase = StandingPhase.OFF
         self._standing_ok = False
+        self._manual_ok = False
         self._ok_since = None
         if was_enabled or automatic:
             self._auto_disabled = automatic

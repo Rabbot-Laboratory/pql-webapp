@@ -347,9 +347,14 @@ async def set_standing(
             detail="adaptive walking active — release Forward before standing",
         )
     try:
-        return await controller.set_enabled(
+        state = await controller.set_enabled(
             request.enabled, safety_confirmed=request.safety_confirmed
         )
+        # enabled=False already cleared any approval, so only apply the
+        # override when the hold is (still) running.
+        if request.manual_ok is not None and request.enabled:
+            state = await controller.set_manual_ok(request.manual_ok)
+        return state
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except RuntimeError as error:

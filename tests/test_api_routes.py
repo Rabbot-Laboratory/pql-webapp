@@ -492,3 +492,32 @@ def test_stabilization_blocks_standing(client: TestClient) -> None:
         assert standing.status_code == 409
     finally:
         client.post("/api/control/stabilization", json={"enabled": False})
+
+
+def test_standing_manual_ok_route(client: TestClient) -> None:
+    _write_home_csv(client)
+
+    rejected = client.post(
+        "/api/control/standing", json={"enabled": True, "manual_ok": True}
+    )
+    assert rejected.status_code == 400  # safety confirmation still required
+
+    started = client.post(
+        "/api/control/standing",
+        json={"enabled": True, "safety_confirmed": True, "manual_ok": True},
+    )
+    assert started.status_code == 200
+    body = started.json()
+    assert body["manual_ok"] is True
+    assert body["standing_ok"] is True
+
+    revoked = client.post(
+        "/api/control/standing", json={"enabled": True, "manual_ok": False}
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["manual_ok"] is False
+
+    client.post("/api/control/standing", json={"enabled": True, "manual_ok": True})
+    stopped = client.post("/api/control/standing", json={"enabled": False})
+    assert stopped.status_code == 200
+    assert stopped.json()["manual_ok"] is False

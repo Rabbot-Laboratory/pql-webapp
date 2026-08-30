@@ -703,3 +703,27 @@ async def _motion_name_override_scenario(tmp_path: Path) -> None:
     finally:
         await controller.release()
         await control.shutdown()
+
+
+def test_manual_standing_approval_opens_the_walk_gate(tmp_path: Path) -> None:
+    asyncio.run(_manual_gate_scenario(tmp_path))
+
+
+async def _manual_gate_scenario(tmp_path: Path) -> None:
+    standing = _FakeStanding(ok=False)
+    controller, control, _clock, _events = _make_walk_controller(
+        tmp_path, adaptive_walk_require_standing=True
+    )
+    controller._standing = standing
+    await control.connect()
+    try:
+        with pytest.raises(RuntimeError, match="standing hold must report OK"):
+            await controller.set_forward_pressed(True, safety_confirmed=True)
+        # The controller only reads standing_ok, so an operator approval that
+        # flips it must open the gate exactly like the automatic judgement.
+        standing.standing_ok = True
+        state = await controller.set_forward_pressed(True, safety_confirmed=True)
+        assert state.active is True
+    finally:
+        await controller.release()
+        await control.shutdown()

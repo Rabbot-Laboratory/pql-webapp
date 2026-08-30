@@ -167,8 +167,8 @@ class Settings(BaseSettings):
     standing_max_attitude_correction: float = Field(default=40.0, ge=0.0, le=500.0)
     # "Standing OK" (walk-gate) criteria: every axis within tolerance AND the
     # body level, sustained for the hold time.
-    standing_ok_tolerance: float = Field(default=200.0, gt=0.0, le=1000.0)
-    standing_ok_max_tilt_deg: float = Field(default=5.0, gt=0.0, le=45.0)
+    standing_ok_tolerance: float = Field(default=500.0, gt=0.0, le=1000.0)
+    standing_ok_max_tilt_deg: float = Field(default=8.0, gt=0.0, le=45.0)
     standing_ok_hold_sec: float = Field(default=2.0, ge=0.0, le=30.0)
     standing_max_tilt_deg: float = Field(default=15.0, gt=0.0, le=45.0)
 

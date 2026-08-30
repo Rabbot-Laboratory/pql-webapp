@@ -20,11 +20,14 @@ const standing = computed(() => store.standing);
 const phaseLabel = computed(() => {
   if (!standing.value?.enabled) return standing.value?.auto_disabled ? '安全停止' : '停止中';
   if (standing.value.phase === 'rising') return '上昇中';
-  return standing.value.standing_ok ? '立位OK' : '保持中';
+  if (standing.value.auto_ok) return '立位OK';
+  if (standing.value.manual_ok) return '立位OK(手動承認)';
+  return '保持中';
 });
 const phaseSeverity = computed(() => {
   if (!standing.value?.enabled) return standing.value?.auto_disabled ? 'danger' : 'secondary';
-  if (standing.value.standing_ok) return 'success';
+  if (standing.value.auto_ok) return 'success';
+  if (standing.value.manual_ok) return 'warn';
   return standing.value.phase === 'rising' ? 'info' : 'warn';
 });
 const axisRows = computed(() => {
@@ -36,6 +39,22 @@ const axisRows = computed(() => {
     overdrive: state.overdrive_active[index] ?? false,
   }));
 });
+
+async function approve(value: boolean): Promise<void> {
+  busy.value = true;
+  try {
+    await store.setStandingManualOk(value);
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '承認を変更できません',
+      detail: error instanceof Error ? error.message : undefined,
+      life: 3500,
+    });
+  } finally {
+    busy.value = false;
+  }
+}
 
 async function toggle(): Promise<void> {
   const enable = !standing.value?.enabled;
@@ -75,6 +94,14 @@ async function toggle(): Promise<void> {
           :disabled="busy || (!standing?.enabled && !safetyConfirmed)"
           @click="toggle"
         />
+        <Button
+          v-if="standing?.enabled && !standing.auto_ok"
+          :label="standing.manual_ok ? '承認を取り消す' : '立位OKとして承認'"
+          :icon="standing.manual_ok ? 'pi pi-times' : 'pi pi-check'"
+          :severity="standing.manual_ok ? 'secondary' : 'warn'"
+          :disabled="busy"
+          @click="approve(!standing.manual_ok)"
+        />
         <div class="motion-meta-row">
           <Tag :severity="phaseSeverity" :value="phaseLabel" />
           <Tag
@@ -94,6 +121,10 @@ async function toggle(): Promise<void> {
           {{ row.label }}: {{ row.error > 0 ? '+' : '' }}{{ row.error }}
         </span>
       </div>
+      <p v-if="standing?.enabled && !standing.auto_ok" class="motion-helper">
+        自動判定が出ない場合、目視で立っていると確認できたら「立位OKとして承認」で歩行ゲートを開けます。
+        承認は安全確認の代わりにはなりません。立位の解除・安全停止・歩行への移行で自動的に取り消されます。
+      </p>
       <p v-if="standing?.disabled_reason && !standing.enabled" class="adaptive-walk-stop-reason">
         停止理由: {{ standing.disabled_reason }}
       </p>

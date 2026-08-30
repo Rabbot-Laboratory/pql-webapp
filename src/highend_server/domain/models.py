@@ -548,12 +548,17 @@ class StandingPhase(str, Enum):
 class StandingRequest(BaseModel):
     enabled: bool
     safety_confirmed: bool = False
+    # Operator override of the automatic standing_ok judgement. None leaves
+    # the current approval untouched; enabled=False always clears it.
+    manual_ok: bool | None = None
 
 
 class StandingState(BaseModel):
     enabled: bool = False
     phase: StandingPhase = StandingPhase.OFF
     standing_ok: bool = False
+    auto_ok: bool = False
+    manual_ok: bool = False
     walk_gate_enabled: bool = True
     auto_disabled: bool = False
     disabled_reason: str | None = None
