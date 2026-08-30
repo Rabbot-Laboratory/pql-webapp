@@ -1,6 +1,16 @@
 import json
+import logging
+import subprocess
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse
 
 from highend_server.api.dependencies import (
@@ -48,6 +58,8 @@ from highend_server.domain.models import (
     StandingRequest,
     StandingState,
     StartTelemetryRecordingRequest,
+    SystemPowerAction,
+    SystemPowerRequest,
     TelemetryRecordingStatus,
     WebGamepadUpdate,
 )
@@ -55,6 +67,51 @@ from highend_server.input.gamepad_service import GamepadService
 from highend_server.sensors.sensor_service import SensorService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _network_addresses() -> list[dict[str, str | None]]:
+    result = subprocess.run(
+        ["ip", "-j", "address", "show"],
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=3,
+    )
+    addresses: list[dict[str, str | None]] = []
+    for interface in json.loads(result.stdout):
+        name = str(interface.get("ifname", ""))
+        kind = (
+            "wifi"
+            if name.startswith(("wl", "wlan"))
+            else "ethernet"
+            if name.startswith(("en", "eth"))
+            else None
+        )
+        if kind is None:
+            continue
+        address = next(
+            (
+                str(item["local"])
+                for item in interface.get("addr_info", [])
+                if item.get("family") == "inet" and item.get("scope") == "global"
+            ),
+            None,
+        )
+        addresses.append({"interface": name, "kind": kind, "address": address})
+    return sorted(addresses, key=lambda item: (item["kind"] != "wifi", item["interface"]))
+
+
+def _run_power_action(action: SystemPowerAction) -> None:
+    command = "poweroff" if action is SystemPowerAction.SHUTDOWN else "reboot"
+    try:
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "--no-block", command],
+            check=True,
+            timeout=10,
+        )
+    except Exception:
+        logger.exception("System power action failed: %s", action.value)
 
 
 def _validate_actuator_id(service: ControlService, actuator_id: int) -> None:
@@ -87,6 +144,26 @@ async def health(
         system=status,
         robot_ready=hardware.state.robot_ready,
     )
+
+
+@router.get("/system/info")
+async def get_system_info() -> dict:
+    try:
+        addresses = _network_addresses()
+    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=503, detail="network information unavailable") from error
+    return {"network_interfaces": addresses}
+
+
+@router.post("/system/power")
+async def set_system_power(
+    request: SystemPowerRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    if not request.confirmed:
+        raise HTTPException(status_code=400, detail="power action requires confirmation")
+    background_tasks.add_task(_run_power_action, request.action)
+    return {"ok": True, "action": request.action.value}
 
 
 @router.get("/actuators")

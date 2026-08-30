@@ -6,7 +6,10 @@ import json
 import pytest
 
 from highend_server.application.control_service import ControlService
-from highend_server.application.pql_a00_kinematics import leg_height_deltas
+from highend_server.application.pql_a00_kinematics import (
+    leg_height_deltas,
+    model_derived_mixing_matrix,
+)
 from highend_server.application.stabilization import (
     DEFAULT_MIXING_MATRIX,
     AxisPid,
@@ -257,7 +260,7 @@ def test_larger_error_gives_larger_correction(tmp_path) -> None:
         await _step_dt(controller2, clock2, 1.0)
         large = controller2._corrections[0]
 
-        assert large > small > 0.0
+        assert abs(large) > abs(small) > 0.0
 
     asyncio.run(scenario())
 
@@ -411,15 +414,16 @@ def test_disable_ramps_corrections_smoothly_to_zero(tmp_path) -> None:
         holder["attitude"] = make_attitude(roll=25.0, pitch=0.0, timestamp=clock())
         await _step_dt(controller, clock, 0.05)
         peak = controller._corrections[0]
-        assert peak > 0.0
+        assert abs(peak) > 0.0
+        sign = 1.0 if peak > 0 else -1.0
 
         # Disable and ramp: decay per step = 120 / 0.5 * 0.05 = 12 units.
         controller._enabled = False
-        seq = [peak]
+        seq = [peak * sign]
         for _ in range(15):
             holder["attitude"] = make_attitude(roll=25.0, pitch=0.0, timestamp=clock())
             await _step_dt(controller, clock, 0.05)
-            seq.append(controller._corrections[0])
+            seq.append(controller._corrections[0] * sign)
 
         assert seq[1] < seq[0]          # not an instant snap to zero
         assert seq[1] > 0.0             # intermediate value present
@@ -580,11 +584,15 @@ def test_e2e_tilt_produces_corrections_then_decays(tmp_path) -> None:
             await _step_dt(controller, clock, 0.04)
             clock.advance(0.04)
 
-        # Right-side actuator 0 must have been driven above its base target.
+        # Actuator 0 must have been driven off its base target in the direction
+        # the model mixing prescribes (roll error = 0 - roll is negative here, so
+        # the correction sign is -mixing[0][0]). The absolute direction is a
+        # hardware question (see pql_a00_model_feedback_design.md, 2026-08-30).
+        expected_sign = -model_derived_mixing_matrix()[0][0]
         frames = _position_frames(gateway)
         front_id0 = [f[0] for p, f in frames if p is PortRole.FRONT]
-        assert any(v > 2048 for v in front_id0), "expected right-side extension frames"
-        assert controller._corrections[0] > 0.0
+        assert any((v - 2048) * expected_sign > 0 for v in front_id0), "expected actuator 0 to move"
+        assert controller._corrections[0] * expected_sign > 0.0
 
         # Return to level and keep ticking: corrections must decay back to ~0.
         for _ in range(40):

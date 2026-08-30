@@ -9,14 +9,17 @@ unavailable / stabilization interlock).
 
 from __future__ import annotations
 
+import json
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import highend_server.api.routes as routes_module
 from highend_server.api.routes import router
 from highend_server.application.adaptive_walking import AdaptiveWalkingController
 from highend_server.application.control_service import ControlService
@@ -158,6 +161,62 @@ def test_health_responds(client: TestClient) -> None:
     assert body["service"] == "highend-control-server"
     assert "system" in body
     assert body["robot_ready"] is True
+
+
+def test_system_info_reports_wifi_and_ethernet(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(
+        routes_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout=json.dumps(
+                [
+                    {
+                        "ifname": "eth0",
+                        "addr_info": [],
+                    },
+                    {
+                        "ifname": "wlan0",
+                        "addr_info": [
+                            {"family": "inet", "scope": "global", "local": "192.168.1.21"}
+                        ],
+                    },
+                    {
+                        "ifname": "tailscale0",
+                        "addr_info": [{"family": "inet", "scope": "global", "local": "100.64.0.1"}],
+                    },
+                ]
+            )
+        ),
+    )
+
+    response = client.get("/api/system/info")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "network_interfaces": [
+            {"interface": "wlan0", "kind": "wifi", "address": "192.168.1.21"},
+            {"interface": "eth0", "kind": "ethernet", "address": None},
+        ]
+    }
+
+
+def test_system_power_requires_confirmation_and_uses_fixed_command(
+    client: TestClient, monkeypatch
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        routes_module.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command),
+    )
+
+    denied = client.post("/api/system/power", json={"action": "reboot", "confirmed": False})
+    accepted = client.post("/api/system/power", json={"action": "reboot", "confirmed": True})
+
+    assert denied.status_code == 400
+    assert accepted.status_code == 200
+    assert accepted.json() == {"ok": True, "action": "reboot"}
+    assert calls == [["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "--no-block", "reboot"]]
 
 
 def test_home_requires_confirmation_and_starts_ramp(client: TestClient) -> None:

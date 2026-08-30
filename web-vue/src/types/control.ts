@@ -321,6 +321,18 @@ export interface HealthResponse {
   robot_ready: boolean;
 }
 
+export type SystemPowerAction = 'shutdown' | 'reboot';
+
+export interface NetworkInterfaceAddress {
+  interface: string;
+  kind: 'wifi' | 'ethernet';
+  address: string | null;
+}
+
+export interface SystemInfo {
+  network_interfaces: NetworkInterfaceAddress[];
+}
+
 export interface HardwareDeviceStatus {
   device_id: string;
   label: string;

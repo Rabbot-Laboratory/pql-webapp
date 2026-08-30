@@ -41,17 +41,19 @@ class ActuatorHeightEffect:
         return copysign(1.0, self.height_m_per_target)
 
 
-# Generated on 2026-07-11 from the PQL-A00 URDF and lower-leg collision meshes.
+# Generated on 2026-07-11 from the PQL-A00 URDF and lower-leg collision meshes;
+# all signs flipped on 2026-08-30 after the hardware check showed the preview's
+# target->angle direction (hip -1 / knee +1) was mirrored for every joint.
 # The ordering is the serial/control ordering used by ControlService.
 ACTUATOR_HEIGHT_EFFECTS: tuple[ActuatorHeightEffect, ...] = (
-    ActuatorHeightEffect(0, LegId.FRONT_RIGHT, "rev_fr2", +1.65906302e-6),
-    ActuatorHeightEffect(1, LegId.FRONT_RIGHT, "rev_fr3", -3.52767462e-5),
-    ActuatorHeightEffect(2, LegId.FRONT_LEFT, "rev_fl2", +4.37948354e-6),
-    ActuatorHeightEffect(3, LegId.FRONT_LEFT, "rev_fl3", -3.68242224e-5),
-    ActuatorHeightEffect(4, LegId.REAR_RIGHT, "rev_rr2", +8.71523298e-6),
-    ActuatorHeightEffect(5, LegId.REAR_RIGHT, "rev_rr3", -3.91568108e-5),
-    ActuatorHeightEffect(6, LegId.REAR_LEFT, "rev_rl2", -6.44408734e-6),
-    ActuatorHeightEffect(7, LegId.REAR_LEFT, "rev_rl3", -2.72224320e-5),
+    ActuatorHeightEffect(0, LegId.FRONT_RIGHT, "rev_fr2", -1.65906302e-6),
+    ActuatorHeightEffect(1, LegId.FRONT_RIGHT, "rev_fr3", +3.52767462e-5),
+    ActuatorHeightEffect(2, LegId.FRONT_LEFT, "rev_fl2", -4.37948354e-6),
+    ActuatorHeightEffect(3, LegId.FRONT_LEFT, "rev_fl3", +3.68242224e-5),
+    ActuatorHeightEffect(4, LegId.REAR_RIGHT, "rev_rr2", -8.71523298e-6),
+    ActuatorHeightEffect(5, LegId.REAR_RIGHT, "rev_rr3", +3.91568108e-5),
+    ActuatorHeightEffect(6, LegId.REAR_LEFT, "rev_rl2", +6.44408734e-6),
+    ActuatorHeightEffect(7, LegId.REAR_LEFT, "rev_rl3", +2.72224320e-5),
 )
 
 _RIGHT_LEGS = frozenset((LegId.FRONT_RIGHT, LegId.REAR_RIGHT))

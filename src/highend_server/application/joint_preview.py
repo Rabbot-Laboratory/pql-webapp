@@ -13,6 +13,10 @@ from highend_server.domain.models import (
 )
 
 # 3D preview tuning knobs.
+# Sign convention (hardware-verified 2026-08-30 by raising target sliders on the
+# suspended robot): increasing a target EXTENDS the cylinder; that bends hips in
+# the +joint direction and knees in the -joint direction of the URDF. The
+# earlier preview (hip -1 / knee +1) showed every joint mirrored.
 # - `*_TRAVEL_DEG` controls the visible total travel around the neutral pose.
 # - `*_NEUTRAL_OFFSET_DEG` shifts the midpoint pose for a joint.
 # - `*_VISUAL_OFFSET_DEG` is the final display-only correction when the model
@@ -93,12 +97,13 @@ LEG_LAYOUTS: tuple[LegLayout, ...] = (
             HIP_TRAVEL_DEG,
             neutral_offset_deg=HIP_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=HIP_VISUAL_OFFSET_DEG_BY_LEG[LegId.FRONT_RIGHT],
-            direction=-1.0,
+            direction=1.0,
         ),
         knee_range=symmetric_joint_range(
             KNEE_TRAVEL_DEG,
             neutral_offset_deg=KNEE_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=KNEE_VISUAL_OFFSET_DEG_BY_LEG[LegId.FRONT_RIGHT],
+            direction=-1.0,
         ),
     ),
     LegLayout(
@@ -114,12 +119,13 @@ LEG_LAYOUTS: tuple[LegLayout, ...] = (
             HIP_TRAVEL_DEG,
             neutral_offset_deg=HIP_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=HIP_VISUAL_OFFSET_DEG_BY_LEG[LegId.FRONT_LEFT],
-            direction=-1.0,
+            direction=1.0,
         ),
         knee_range=symmetric_joint_range(
             KNEE_TRAVEL_DEG,
             neutral_offset_deg=KNEE_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=KNEE_VISUAL_OFFSET_DEG_BY_LEG[LegId.FRONT_LEFT],
+            direction=-1.0,
         ),
     ),
     LegLayout(
@@ -135,12 +141,13 @@ LEG_LAYOUTS: tuple[LegLayout, ...] = (
             HIP_TRAVEL_DEG,
             neutral_offset_deg=HIP_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=HIP_VISUAL_OFFSET_DEG_BY_LEG[LegId.REAR_RIGHT],
-            direction=-1.0,
+            direction=1.0,
         ),
         knee_range=symmetric_joint_range(
             KNEE_TRAVEL_DEG,
             neutral_offset_deg=KNEE_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=KNEE_VISUAL_OFFSET_DEG_BY_LEG[LegId.REAR_RIGHT],
+            direction=-1.0,
         ),
     ),
     LegLayout(
@@ -156,12 +163,13 @@ LEG_LAYOUTS: tuple[LegLayout, ...] = (
             HIP_TRAVEL_DEG,
             neutral_offset_deg=HIP_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=HIP_VISUAL_OFFSET_DEG_BY_LEG[LegId.REAR_LEFT],
-            direction=-1.0,
+            direction=1.0,
         ),
         knee_range=symmetric_joint_range(
             KNEE_TRAVEL_DEG,
             neutral_offset_deg=KNEE_NEUTRAL_OFFSET_DEG,
             visual_offset_deg=KNEE_VISUAL_OFFSET_DEG_BY_LEG[LegId.REAR_LEFT],
+            direction=-1.0,
         ),
     ),
 )

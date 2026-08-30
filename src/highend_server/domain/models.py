@@ -62,6 +62,11 @@ class PlaybackStatus(str, Enum):
     STOPPING = "stopping"
 
 
+class SystemPowerAction(str, Enum):
+    SHUTDOWN = "shutdown"
+    REBOOT = "reboot"
+
+
 class ConnectionState(str, Enum):
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
@@ -578,6 +583,11 @@ class AdaptiveWalkRequest(BaseModel):
 
 class HomePoseRequest(BaseModel):
     safety_confirmed: bool = False
+
+
+class SystemPowerRequest(BaseModel):
+    action: SystemPowerAction
+    confirmed: bool = False
 
 
 class AdaptiveWalkState(BaseModel):

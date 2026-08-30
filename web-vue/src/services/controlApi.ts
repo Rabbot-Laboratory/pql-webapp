@@ -19,6 +19,8 @@ import type {
   StabilizationGains,
   StabilizationState,
   StandingState,
+  SystemInfo,
+  SystemPowerAction,
   TelemetryRecordingScope,
   TelemetryRecordingStatus,
   TelemetryEvent,
@@ -43,6 +45,20 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return readJson<HealthResponse>('/api/health');
+}
+
+export async function fetchSystemInfo(): Promise<SystemInfo> {
+  return readJson<SystemInfo>('/api/system/info');
+}
+
+export async function requestSystemPower(
+  action: SystemPowerAction,
+): Promise<{ ok: boolean; action: SystemPowerAction }> {
+  return readJson<{ ok: boolean; action: SystemPowerAction }>('/api/system/power', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, confirmed: true }),
+  });
 }
 
 export async function fetchActuators(): Promise<{ items: ActuatorState[] }> {
